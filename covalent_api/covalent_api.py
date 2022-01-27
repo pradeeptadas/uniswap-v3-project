@@ -2,8 +2,10 @@ import requests
 import pandas as pd
 import numpy as np
 import itertools
+import logging
 
 
+logger = logging.getLogger(__name__)
 BASE_URL = 'https://api.covalenthq.com'
 
 
@@ -69,12 +71,12 @@ def get_covalent_data(api_key, endpoint, params=None,
 
         if response.ok:
             content = response.json()
+            logger.debug(f'Queried page {i} for endpoint: {endpoint}')
             all_responses.append(response)
             has_more = content['data']['pagination']['has_more']
             i += 1
         elif response.status_code in retry_codes:  # happens when all attempts fail
-            # TODO: move to logging if this sees broader use
-            print(
+            logger.warning(
                 f"Could not request page {i} after {n_attempts} attempts. "
                 f"Page {i} was skipped."
             )
@@ -161,8 +163,7 @@ def get_uniswapv3_counts(api_key=None, pool_address=None, transaction='swaps',
         content = response.json()
         return content['data']['pagination']['total_count']
     elif response.status_code in retry_codes:  # happens when all attempts fail
-        # TODO: move to logging if this sees broader use
-        print(
+        logger.warning(
             f"Could not request page count data after {n_attempts} attempts. "
             f"None was returned."
         )
