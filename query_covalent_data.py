@@ -44,7 +44,7 @@ def main(pool_info, output_file):
         try:
             liquidity = get_uniswapv3_liquidity(
                 api_key=API_KEY,
-                pool_address='0x60594a405d53811d3bc4766596efd80fd545a270',
+                pool_address=row['pool_contract_address'],
                 page_size=5000,
                 total_pages=None
             )
