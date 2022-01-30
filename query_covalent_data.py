@@ -31,7 +31,7 @@ def main(pool_info, output_file):
                 api_key=API_KEY,
                 pool_address=row['pool_contract_address'],
                 page_size=5000,
-                total_pages=None
+                page_number=None
             )
             logger.info(f'Queried swap data for {pool_id}.')
         except (APIError, requests.ConnectionError) as e:
@@ -46,7 +46,7 @@ def main(pool_info, output_file):
                 api_key=API_KEY,
                 pool_address=row['pool_contract_address'],
                 page_size=5000,
-                total_pages=None
+                page_number=None
             )
             logger.info(f'Queried liquidity data for {pool_id}.')
         except (APIError, requests.ConnectionError) as e:

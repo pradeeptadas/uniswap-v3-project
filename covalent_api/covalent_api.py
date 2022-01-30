@@ -48,7 +48,7 @@ def raise_api_error(response):
 
 
 def get_covalent_data(api_key, endpoint, params=None,
-                      page_size=100, total_pages=None,
+                      page_size=100, page_number=None,
                       n_attempts=1, retry_codes=(507,)):
     url = BASE_URL + endpoint
     if params is None:
@@ -56,13 +56,10 @@ def get_covalent_data(api_key, endpoint, params=None,
     else:
         params['page-size'] = page_size
 
-    if total_pages is None:
-        total_pages = np.inf
-
+    i = 0 if page_number is None else page_number
     all_responses = []
-    i = 0
     has_more = True
-    while has_more and (i < total_pages):
+    while has_more:
         params['page-number'] = i
         args = [url]
         kwargs = {'auth': (api_key, ''), 'params': params}
@@ -73,7 +70,10 @@ def get_covalent_data(api_key, endpoint, params=None,
             content = response.json()
             logger.debug(f'Queried page {i} for endpoint: {endpoint}')
             all_responses.append(response)
-            has_more = content['data']['pagination']['has_more']
+            has_more = (
+                False if content['data']['pagination'] is None
+                else content['data']['pagination']['has_more']
+            )
             i += 1
         elif response.status_code in retry_codes:  # happens when all attempts fail
             logger.warning(
@@ -82,6 +82,9 @@ def get_covalent_data(api_key, endpoint, params=None,
             )
         else:
             raise_api_error(response)
+
+        if page_number is not None:
+            break
 
     all_content = [r.json()['data']['items'] for r in all_responses]
     all_content = list(itertools.chain(*all_content))
@@ -99,44 +102,47 @@ def get_uniswapv3_pools(api_key=None, page_size=1000,
                                     retry_codes=retry_codes)
 
     df = pd.DataFrame(all_content)
-    df = unravel_token(df, 'token_0')
-    df = unravel_token(df, 'token_1')
+    if df.shape[0] > 0:
+        df = unravel_token(df, 'token_0')
+        df = unravel_token(df, 'token_1')
 
     return df
 
 
 def get_uniswapv3_liquidity(api_key=None, pool_address=None,
-                            page_size=1000, total_pages=None,
+                            page_size=1000, page_number=None,
                             n_attempts=10, retry_codes=(507,)):
     # chain_id=1 as Uniswap v3 is on the Ethereum Mainnet 
     endpoint = f"/v1/1/uniswap_v3/liquidity/address/{pool_address}/"
     all_content = get_covalent_data(api_key, endpoint,
                                     page_size=page_size,
-                                    total_pages=total_pages,
+                                    page_number=page_number,
                                     n_attempts=n_attempts,
                                     retry_codes=retry_codes)
 
     df = pd.DataFrame(all_content)
-    df = unravel_token(df, 'token_0')
-    df = unravel_token(df, 'token_1')
+    if df.shape[0] > 0:
+        df = unravel_token(df, 'token_0')
+        df = unravel_token(df, 'token_1')
 
     return df
 
 
 def get_uniswapv3_swaps(api_key=None, pool_address=None,
-                        page_size=1000, total_pages=None,
+                        page_size=1000, page_number=None,
                         n_attempts=10, retry_codes=(507,)):
     # chain_id=1 as Uniswap v3 is on the Ethereum Mainnet 
     endpoint = f"/v1/1/uniswap_v3/swaps/address/{pool_address}/"
     all_content = get_covalent_data(api_key, endpoint,
                                     page_size=page_size,
-                                    total_pages=total_pages,
+                                    page_number=page_number,
                                     n_attempts=n_attempts,
                                     retry_codes=retry_codes)
 
     df = pd.DataFrame(all_content)
-    df = unravel_token(df, 'token_0')
-    df = unravel_token(df, 'token_1')
+    if df.shape[0] > 0:
+        df = unravel_token(df, 'token_0')
+        df = unravel_token(df, 'token_1')
 
     return df
 
