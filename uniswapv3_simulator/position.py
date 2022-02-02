@@ -1,6 +1,8 @@
 import numpy as np
 import bisect
 
+from .math import *
+
 
 class PositionMap(dict):
     """
@@ -47,9 +49,16 @@ class Position:
         :param fee_growth_inside1:
         """
         # calculate the uncollected/accumulated fees
-        # formula 6.28 (formulas are the same for each token)
-        uncollected_fees0 = self.liquidity * (fee_growth_inside0 - self.fee_growth_inside0_last)
-        uncollected_fees1 = self.liquidity * (fee_growth_inside1 - self.fee_growth_inside1_last)
+        uncollected_fees0 = get_uncollected_fees(
+            self.liquidity,
+            fee_growth_inside0,
+            self.fee_growth_inside0_last
+        )
+        uncollected_fees1 = get_uncollected_fees(
+            self.liquidity,
+            fee_growth_inside1,
+            self.fee_growth_inside1_last
+        )
 
         # update the position
         self.liquidity += liquidity_delta
@@ -62,5 +71,6 @@ class Position:
         return (
             f"Position(account_id={self.account_id}, "
             f"tick_lower={self.tick_lower:,.0f}, "
-            f"tick_upper={self.tick_upper:,.0f})"
+            f"tick_upper={self.tick_upper:,.0f}, "
+            f"liquidity={self.liquidity:,.2f})"
         )
