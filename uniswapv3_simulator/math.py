@@ -27,14 +27,14 @@ def tick_to_sqrt_price(tick):
     return 1.0001 ** (tick / 2)
 
 
-def token_delta(liquidity_delta,
-                sqrt_price, sqrt_price_lower, sqrt_price_upper,
-                tick, tick_lower, tick_upper):
+def get_delta_token0(liquidity_delta,
+                     sqrt_price, sqrt_price_lower, sqrt_price_upper,
+                     tick, tick_lower, tick_upper):
     """
     TODO: finish documentation
     Calculate \Delta X, \Delta Y, the amounts of token0 and token1, respectively
     that needs to be contributed to add \Delta L liquidity to the pool. See
-    formulas 6.29 and 6.30 in the white paper.
+    formula 6.30 in the white paper.
 
     :param liquidity_delta:
     :param sqrt_price:
@@ -46,33 +46,44 @@ def token_delta(liquidity_delta,
     :return:
     """
     if tick < tick_lower:
-        delta_token0 = (
-            liquidity_delta
-            * (1 / sqrt_price_lower - 1 / sqrt_price_upper)
-        )
-        delta_token1 = 0
-
+        delta_token0 = liquidity_delta * (1 / sqrt_price_lower - 1 / sqrt_price_upper)
     elif tick < tick_upper:
-        delta_token0 = (
-            liquidity_delta
-            * (1 / sqrt_price - 1 / sqrt_price_upper)
-        )
-        delta_token1 = (
-            liquidity_delta
-            * (sqrt_price - sqrt_price_lower)
-        )
-
+        delta_token0 = liquidity_delta * (1 / sqrt_price - 1 / sqrt_price_upper)
     else:
         delta_token0 = 0
-        delta_token1 = (
-            liquidity_delta
-            * (sqrt_price_upper - sqrt_price_lower)
-        )
 
-    return delta_token0, delta_token1
+    return delta_token0
 
 
-def init_fee_growth_outside(init_tick, current_tick, fee_growth_global):
+def get_delta_token1(liquidity_delta,
+                     sqrt_price, sqrt_price_lower, sqrt_price_upper,
+                     tick, tick_lower, tick_upper):
+    """
+    TODO: finish documentation
+    Calculate \Delta X, \Delta Y, the amounts of token0 and token1, respectively
+    that needs to be contributed to add \Delta L liquidity to the pool. See
+    formula 6.29 in the white paper.
+
+    :param liquidity_delta:
+    :param sqrt_price:
+    :param tick:
+    :param tick_lower:
+    :param tick_upper:
+    :param sqrt_price_lower:
+    :param sqrt_price_upper:
+    :return:
+    """
+    if tick < tick_lower:
+        delta_token1 = 0
+    elif tick < tick_upper:
+        delta_token1 = liquidity_delta * (sqrt_price - sqrt_price_lower)
+    else:
+        delta_token1 = liquidity_delta * (sqrt_price_upper - sqrt_price_lower)
+
+    return delta_token1
+
+
+def get_init_fee_growth_outside(init_tick, current_tick, fee_growth_global):
     """
     TODO: update documentation
 
@@ -84,8 +95,8 @@ def init_fee_growth_outside(init_tick, current_tick, fee_growth_global):
     return fee_growth_global if current_tick >= init_tick else 0  # formula 6.21
 
 
-def fee_growth_above(fee_growth_global, fee_growth_outside,
-                     current_tick, tick):
+def get_fee_growth_above(fee_growth_global, fee_growth_outside,
+                         current_tick, tick):
     """
     TODO: update documentation
 
@@ -102,8 +113,8 @@ def fee_growth_above(fee_growth_global, fee_growth_outside,
     )
 
 
-def fee_growth_below(fee_growth_global, fee_growth_outside,
-                     current_tick, tick):
+def get_fee_growth_below(fee_growth_global, fee_growth_outside,
+                         current_tick, tick):
     """
     TODO: update documentation
 
@@ -120,9 +131,9 @@ def fee_growth_below(fee_growth_global, fee_growth_outside,
     )
 
 
-def fee_growth_inside(fee_growth_global,
-                      fee_growth_outside_lower, fee_growth_outside_upper,
-                      tick, tick_upper, tick_lower):
+def get_fee_growth_inside(fee_growth_global,
+                          fee_growth_outside_lower, fee_growth_outside_upper,
+                          tick, tick_upper, tick_lower):
     """
     TODO: update documentation
 
@@ -135,11 +146,69 @@ def fee_growth_inside(fee_growth_global,
     :return:
     """
     # formula 6.17
-    fa_upper = fee_growth_above(fee_growth_global, fee_growth_outside_upper,
-                                tick, tick_upper)
+    fa_upper = get_fee_growth_above(fee_growth_global, fee_growth_outside_upper,
+                                    tick, tick_upper)
     # formula 6.18
-    fb_lower = fee_growth_below(fee_growth_global, fee_growth_outside_lower,
-                                tick, tick_lower)
+    fb_lower = get_fee_growth_below(fee_growth_global, fee_growth_outside_lower,
+                                    tick, tick_lower)
 
     return fee_growth_global - fb_lower - fa_upper  # formula 6.19
 
+
+def get_uncollected_fees(liquidity, fee_growth_inside, fee_growth_inside_last):
+    """
+    TODO: update documentation
+    formula 6.28 (formulas are the same for each token)
+
+    :param liquidity:
+    :param fee_growth_inside:
+    :param fee_growth_inside_last:
+    :return:
+    """
+    return liquidity * (fee_growth_inside - fee_growth_inside_last)  # formula 6.28
+
+
+def swap_within_tick(token, tokens_in, sqrt_price, liquidity,
+                     next_tick_sqrt_price):
+    """
+    TODO: finish documentation
+    See section 6.2.3 of the white paper
+
+    :param token:
+    :param tokens_in:
+    :param sqrt_price:
+    :param liquidity:
+    :param next_tick_sqrt_price:
+    :return:
+    """
+    # calculate the next_sqrt_price, limited by the next_tick_sqrt_price
+    # if next_sqrt_price is outside of next_tick_sqrt_price, then we only
+    # execute part of the swap and cross the next tick to execute the
+    # remaining amount
+    if token == 0:
+        assert next_tick_sqrt_price < sqrt_price, (
+            'Expected next_tick_sqrt_price < sqrt_price'
+        )
+        # temporary delta_sqrt_price_inv to determine the actual next_sqrt_price
+        delta_sqrt_price_inv = tokens_in / liquidity  # formula 6.15
+        next_sqrt_price_inv = (1 / sqrt_price) + delta_sqrt_price_inv
+        next_sqrt_price = max(
+            1 / next_sqrt_price_inv,
+            next_tick_sqrt_price
+        )
+    else:
+        assert next_tick_sqrt_price > sqrt_price, (
+            'Expected next_tick_sqrt_price > sqrt_price'
+        )
+        next_sqrt_price = min(
+            sqrt_price + tokens_in / liquidity,  # formula 6.13
+            next_tick_sqrt_price
+        )
+
+    delta_sqrt_price = next_sqrt_price - sqrt_price
+    delta_token1 = delta_sqrt_price * liquidity  # formula 6.14
+
+    delta_sqrt_price_inv = (1 / next_sqrt_price) - (1 / sqrt_price)
+    delta_token0 = delta_sqrt_price_inv * liquidity  # formula 6.16
+
+    return delta_token0, delta_token1, next_sqrt_price
