@@ -133,7 +133,7 @@ def get_fee_growth_below(fee_growth_global, fee_growth_outside,
 
 def get_fee_growth_inside(fee_growth_global,
                           fee_growth_outside_lower, fee_growth_outside_upper,
-                          tick, tick_upper, tick_lower):
+                          tick, tick_lower, tick_upper):
     """
     TODO: update documentation
 
@@ -141,16 +141,19 @@ def get_fee_growth_inside(fee_growth_global,
     :param fee_growth_outside_lower:
     :param fee_growth_outside_upper:
     :param tick:
-    :param tick_upper:
     :param tick_lower:
+    :param tick_upper:
     :return:
     """
+    print(fee_growth_global, fee_growth_outside_lower, fee_growth_outside_upper, tick, tick_lower, tick_upper)
     # formula 6.17
     fa_upper = get_fee_growth_above(fee_growth_global, fee_growth_outside_upper,
                                     tick, tick_upper)
+    print('fa_upper', fa_upper)
     # formula 6.18
     fb_lower = get_fee_growth_below(fee_growth_global, fee_growth_outside_lower,
                                     tick, tick_lower)
+    print('fb_lower', fb_lower)
 
     return fee_growth_global - fb_lower - fa_upper  # formula 6.19
 

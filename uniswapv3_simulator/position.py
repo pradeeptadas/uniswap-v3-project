@@ -1,7 +1,9 @@
-import numpy as np
-import bisect
+import logging
 
 from .math import *
+
+
+logger = logging.getLogger('uniswap-v3.position')
 
 
 class PositionMap(dict):
@@ -40,6 +42,11 @@ class Position:
         self.tokens_owed0 = 0
         self.tokens_owed1 = 0
 
+        logger.debug(
+            f'Position {self.account_id}, {self.tick_lower:,}, '
+            f'{self.tick_upper:,} initialized.'
+        )
+
     def update(self, liquidity_delta, fee_growth_inside0, fee_growth_inside1):
         """
         TODO: update documentation
@@ -48,6 +55,10 @@ class Position:
         :param fee_growth_inside0:
         :param fee_growth_inside1:
         """
+        # TODO: this has some issues when the current tick is at the end of
+        #  the initialized tick range
+        #  probably stems from the tick crossing logic (i.e., when to actually
+        #  cross a tick)
         # calculate the uncollected/accumulated fees
         uncollected_fees0 = get_uncollected_fees(
             self.liquidity,
@@ -59,13 +70,22 @@ class Position:
             fee_growth_inside1,
             self.fee_growth_inside1_last
         )
+        logger.debug(f'token0 uncollected fees: {uncollected_fees0:,.4f}.')
+        logger.debug(f'token1 uncollected fees: {uncollected_fees1:,.4f}.')
+
+        new_liquidity = self.liquidity + liquidity_delta
+        assert new_liquidity >= 0, "A position's liquidity cannot be < 0."
 
         # update the position
-        self.liquidity += liquidity_delta
+        self.liquidity = new_liquidity
         self.fee_growth_inside0_last = fee_growth_inside0
         self.fee_growth_inside1_last = fee_growth_inside1
         self.tokens_owed0 += uncollected_fees0
         self.tokens_owed1 += uncollected_fees1
+
+        logger.debug(f'Updated position liquidity: {self.liquidity:,.2f}.')
+        logger.debug(f'Total token0 owed: {self.tokens_owed0:,.4f}.')
+        logger.debug(f'Total token1 owed: {self.tokens_owed1:,.4f}.')
 
     def __repr__(self):
         return (
@@ -74,3 +94,14 @@ class Position:
             f"tick_upper={self.tick_upper:,.0f}, "
             f"liquidity={self.liquidity:,.2f})"
         )
+
+    # defining hash and equal so that we can use the Position class with
+    # Python sets
+    def __hash__(self):
+        return hash((self.account_id, self.tick_lower, self.tick_upper))
+
+    def __eq__(self, other):
+        if isinstance(other, Position):
+            return self.__hash__() == other.__hash__()
+        else:
+            return False
