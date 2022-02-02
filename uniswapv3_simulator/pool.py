@@ -1,4 +1,5 @@
 import bisect
+from collections import defaultdict
 import logging
 import warnings
 
@@ -7,7 +8,7 @@ from .position import PositionMap
 from .math import *
 
 
-logger = logging.getLogger('uniswap-v3')
+logger = logging.getLogger('uniswap-v3.pool')
 
 
 class Uniswapv3Pool:
@@ -50,6 +51,10 @@ class Uniswapv3Pool:
 
         # (account_id, tick_lower, tick_upper), Position object pairs
         self.position_map = PositionMap()
+
+        # additional helper variables (not in Uniswap v3 white
+        # paper/implementation)
+        self.account_map = defaultdict(set)  # account_id, set of Positions pairs
 
     @property
     def price(self):
@@ -94,24 +99,23 @@ class Uniswapv3Pool:
             self.tick_map[tick_lower].fee_growth_outside0,
             self.tick_map[tick_upper].fee_growth_outside0,
             self.tick,
-            tick_upper,
-            tick_lower
+            tick_lower,
+            tick_upper
         )
         fee_growth_inside1 = get_fee_growth_inside(
             self.fee_growth_global1,
             self.tick_map[tick_lower].fee_growth_outside1,
             self.tick_map[tick_upper].fee_growth_outside1,
             self.tick,
-            tick_upper,
-            tick_lower
+            tick_lower,
+            tick_upper
         )
+        logger.debug(f'token0 fee growth inside position range: {fee_growth_inside0:,.4f}.')
+        logger.debug(f'token1 fee growth inside position range: {fee_growth_inside1:,.4f}.')
 
         # get/initialize the position and update it for liquidity_delta
         position = self.position_map[(account_id, tick_lower, tick_upper)]
-        if position.liquidity == 0:
-            assert liquidity_delta > 0, (
-                'Cannot set a new position with negative liquidity.'
-            )
+        self.account_map[account_id].add(position)
         position.update(liquidity_delta, fee_growth_inside0, fee_growth_inside1)
 
         # update the lower and upper ticks for liquidity_delta
@@ -126,6 +130,8 @@ class Uniswapv3Pool:
         # liquidity_delta to the global liquidity value
         if sqrt_price_lower <= self.sqrt_price <= sqrt_price_upper:
             self.liquidity += liquidity_delta
+            logger.debug(f'liquidity_delta ({liquidity_delta:,.2f}) added to liquidity.')
+            logger.debug(f'Updated liquidity: {self.liquidity:,.2f}.')
 
         # calculate the amount of token0 and token1 to be deposited into the pool
         # negative values indicate that tokens are removed from the pool
@@ -150,6 +156,8 @@ class Uniswapv3Pool:
         )
         self.token0 += delta_token0
         self.token1 += delta_token1
+        logger.debug(f'token0 added to/removed from pool: {delta_token0:,.4f}')
+        logger.debug(f'token1 added to/removed from pool: {delta_token1:,.4f}')
 
         # clear any ticks that are no longer needed
         # ticks will only be removed when removing liquidity
@@ -158,8 +166,16 @@ class Uniswapv3Pool:
             #  need to figure out an appropriate tol though
             if self.tick_map[tick_lower].liquidity_gross == 0:
                 self._del_tick(tick_lower)
+                logger.debug(
+                    f'Tick {tick_lower:,} no longer has liquidity referencing '
+                    f'it and was deleted.'
+                )
             if self.tick_map[tick_upper].liquidity_gross == 0:
                 self._del_tick(tick_upper)
+                logger.debug(
+                    f'Tick {tick_lower:,} no longer has liquidity referencing '
+                    f'it and was deleted.'
+                )
 
         return -delta_token0, -delta_token1
 
@@ -247,7 +263,8 @@ class Uniswapv3Pool:
                 assert sqrt_price_to_tick(current_sqrt_price) == current_tick, (
                     'Calculated current tick does not match current tick from swap.'
                 )
-                # get the next tick
+                # get the next, next tick (the tick to the left/right of the
+                # previous next_tick, now current_tick)
                 to_the_right = (token == 1)
                 next_tick = self._get_next_tick(current_tick, to_the_right)
                 if next_tick is None:
@@ -257,8 +274,9 @@ class Uniswapv3Pool:
                     partial_swap = True
                     break
 
-                # cross the next tick (now the current tick)
-                # we check for a tick to the left/right of the next tick before
+                # cross the next tick (now current_tick)
+                # TODO: this check might be wrong... need to revisit
+                # we check for a tick to the left/right of the tick before
                 # crossing the tick to ensure that the swap can continue
                 # we don't want to cross a tick if there is no liquidity on
                 # the other side
@@ -277,6 +295,9 @@ class Uniswapv3Pool:
                 logger.debug('Swap complete.')
                 break
 
+        # TODO: need to move the feel logic inside the while loop as fee growth
+        #  global is on a per unit of liquidity basis and liquidity changes as
+        #  cross ticks
         # Calculate the total tokens the trader must add and how much he/she
         # receives. Actual tokens in may differ from tokens_in if only part of the
         # swap was executed due to limited liquidity.
@@ -292,7 +313,7 @@ class Uniswapv3Pool:
             logger.debug(f'Token1 received by trader: {abs(total_delta_token1):,.4f}')
 
             fees_added = total_delta_token0 * self.fee
-            self.fee_growth_global0 += fees_added
+            self.fee_growth_global0 += fees_added / self.liquidity
         else:
             total_delta_token1 = delta_token1_acc / (1 - self.fee)
             total_delta_token0 = delta_token0_acc
@@ -302,7 +323,7 @@ class Uniswapv3Pool:
             logger.debug(f'Token1 added by trader: {abs(total_delta_token1):,.4f}')
 
             fees_added = total_delta_token1 * self.fee
-            self.fee_growth_global1 += fees_added
+            self.fee_growth_global1 += fees_added / self.liquidity
 
         logger.debug(f'Total token{token} added to pool fees: {fees_added:,.4f}')
         logger.debug(f'Total token0 added to/removed from pool: {delta_token0_acc:,.4f}')

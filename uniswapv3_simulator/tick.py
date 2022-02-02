@@ -1,4 +1,9 @@
+import logging
+
 from .math import tick_to_sqrt_price
+
+
+logger = logging.getLogger('uniswap-v3.tick')
 
 
 # These are very small and very large numbers, so it is highly unlikely
@@ -34,6 +39,10 @@ class Tick:
         self.fee_growth_outside0 = init_fee_growth_global0
         self.fee_growth_outside1 = init_fee_growth_global1
 
+        logger.debug(
+            f'Tick {self.i:,} initialized (sqrt_price={self.sqrt_price:,.4f}).'
+        )
+
     def update_liquidity(self, liquidity_delta, upper):
         """
         TODO: update documentation
@@ -46,8 +55,10 @@ class Tick:
         self.liquidity_gross += liquidity_delta
         if upper:
             self.liquidity_net -= liquidity_delta
+            logger.debug(f'{liquidity_delta:,.2f} subtracted from tick {self.i:,}.')
         else:
             self.liquidity_net += liquidity_delta
+            logger.debug(f'{liquidity_delta:,.2f} added to tick {self.i:,}.')
 
     # TODO: make sure this happens when a tick is crossed during a swap
     def update_fee_growth_outside(self, fee_growth_global0, fee_growth_global1):
@@ -60,6 +71,9 @@ class Tick:
         # formula 6.20 (formulas are the same for each token)
         self.fee_growth_outside0 = fee_growth_global0 - self.fee_growth_outside0
         self.fee_growth_outside1 = fee_growth_global1 - self.fee_growth_outside1
+
+        logger.debug(f'Fee growth outside token0 updated: {self.fee_growth_outside0}.')
+        logger.debug(f'Fee growth outside token1 updated: {self.fee_growth_outside1}.')
 
     def __repr__(self):
         return f"Tick(i={self.i:,.0f}, price={self.sqrt_price ** 2:,.4f})"
