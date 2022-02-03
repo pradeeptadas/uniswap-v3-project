@@ -55,10 +55,10 @@ class Tick:
         self.liquidity_gross += liquidity_delta
         if upper:
             self.liquidity_net -= liquidity_delta
-            logger.debug(f'{liquidity_delta:,.2f} subtracted from tick {self.i:,}.')
+            logger.debug(f'{liquidity_delta:,.2f} liquidity subtracted from tick {self.i:,}.')
         else:
             self.liquidity_net += liquidity_delta
-            logger.debug(f'{liquidity_delta:,.2f} added to tick {self.i:,}.')
+            logger.debug(f'{liquidity_delta:,.2f} liquidity added to tick {self.i:,}.')
 
     # TODO: make sure this happens when a tick is crossed during a swap
     def update_fee_growth_outside(self, fee_growth_global0, fee_growth_global1):
