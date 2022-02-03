@@ -13,6 +13,9 @@ logger = logging.getLogger('uniswap-v3.pool')
 
 class SwapState:
     def __init__(self):
+        """
+        TODO: finish documentation
+        """
         self.step_n = None
         self.amount_remaining = None
         self.amount_calculated = None
@@ -25,6 +28,9 @@ class SwapState:
 
 class StepComputation:
     def __init__(self):
+        """
+        TODO: finish documentation
+        """
         self.sqrt_price_start = None
         self.next_tick = None
         self.sqrt_price_next = None
@@ -395,7 +401,7 @@ class Uniswapv3Pool:
 
     def collect_fees_earned(self):
         # extract the tokens_owed{0,1} from the position (and the pool)
-        pass
+        raise NotImplementedError
 
     def _init_tick(self, i):
         """
