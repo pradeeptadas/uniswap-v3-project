@@ -72,8 +72,8 @@ class Tick:
         self.fee_growth_outside0 = fee_growth_global0 - self.fee_growth_outside0
         self.fee_growth_outside1 = fee_growth_global1 - self.fee_growth_outside1
 
-        logger.debug(f'Fee growth outside token0 updated: {self.fee_growth_outside0}.')
-        logger.debug(f'Fee growth outside token1 updated: {self.fee_growth_outside1}.')
+        logger.debug(f'Fee growth outside token0 updated: {self.fee_growth_outside0:,.8f}.')
+        logger.debug(f'Fee growth outside token1 updated: {self.fee_growth_outside1:,.8f}.')
 
     def __repr__(self):
         return f"Tick(i={self.i:,.0f}, price={self.sqrt_price ** 2:,.4f})"

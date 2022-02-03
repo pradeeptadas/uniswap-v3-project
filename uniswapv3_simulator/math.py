@@ -96,7 +96,7 @@ def get_init_fee_growth_outside(init_tick, current_tick, fee_growth_global):
 
 
 def get_fee_growth_above(fee_growth_global, fee_growth_outside,
-                         current_tick, tick):
+                         current_tick, tick, at_max_tick=False):
     """
     TODO: update documentation
 
@@ -106,9 +106,20 @@ def get_fee_growth_above(fee_growth_global, fee_growth_outside,
     :param tick:
     :return:
     """
+    # If we are currently at the max tick, the fee growth above the tick
+    # should be fee_growth_outside, not fee_growth_global - fee_growth_outside,
+    # as the current tick is the lower bound of the price range whereas the
+    # max tick is an upper bound on the position. In other words, position
+    # ranges are given by:
+    # [ tick_to_sqrt_price(lower_tick), tick_to_sqrt_price(upper_tick) ]
+    # so the tick_upper doesn't have any area above it (as ticks are lower
+    # bounds) whereas the lower tick does have area above it.
+    # This is a deviation from the white paper to handle an edge case, so we
+    # need to keep an eye on it.
+    tick_condition = (current_tick > tick) if at_max_tick else (current_tick >= tick)
     # formula 6.17
     return (
-        fee_growth_global - fee_growth_outside if current_tick >= tick
+        fee_growth_global - fee_growth_outside if tick_condition
         else fee_growth_outside
     )
 
@@ -133,7 +144,8 @@ def get_fee_growth_below(fee_growth_global, fee_growth_outside,
 
 def get_fee_growth_inside(fee_growth_global,
                           fee_growth_outside_lower, fee_growth_outside_upper,
-                          tick, tick_lower, tick_upper):
+                          tick, tick_lower, tick_upper,
+                          at_max_tick=False):
     """
     TODO: update documentation
 
@@ -145,15 +157,12 @@ def get_fee_growth_inside(fee_growth_global,
     :param tick_upper:
     :return:
     """
-    print(fee_growth_global, fee_growth_outside_lower, fee_growth_outside_upper, tick, tick_lower, tick_upper)
     # formula 6.17
     fa_upper = get_fee_growth_above(fee_growth_global, fee_growth_outside_upper,
-                                    tick, tick_upper)
-    print('fa_upper', fa_upper)
+                                    tick, tick_upper, at_max_tick=at_max_tick)
     # formula 6.18
     fb_lower = get_fee_growth_below(fee_growth_global, fee_growth_outside_lower,
                                     tick, tick_lower)
-    print('fb_lower', fb_lower)
 
     return fee_growth_global - fb_lower - fa_upper  # formula 6.19
 
@@ -171,8 +180,7 @@ def get_uncollected_fees(liquidity, fee_growth_inside, fee_growth_inside_last):
     return liquidity * (fee_growth_inside - fee_growth_inside_last)  # formula 6.28
 
 
-def swap_within_tick(token, tokens_in, sqrt_price, liquidity,
-                     next_tick_sqrt_price):
+def swap_within_tick(token, tokens_in, sqrt_price, liquidity, sqrt_price_limit):
     """
     TODO: finish documentation
     See section 6.2.3 of the white paper
@@ -181,7 +189,7 @@ def swap_within_tick(token, tokens_in, sqrt_price, liquidity,
     :param tokens_in:
     :param sqrt_price:
     :param liquidity:
-    :param next_tick_sqrt_price:
+    :param sqrt_price_limit:
     :return:
     """
     # calculate the next_sqrt_price, limited by the next_tick_sqrt_price
@@ -189,23 +197,23 @@ def swap_within_tick(token, tokens_in, sqrt_price, liquidity,
     # execute part of the swap and cross the next tick to execute the
     # remaining amount
     if token == 0:
-        assert next_tick_sqrt_price < sqrt_price, (
-            'Expected next_tick_sqrt_price < sqrt_price'
+        assert sqrt_price_limit < sqrt_price, (
+            'Expected sqrt_price_limit < sqrt_price'
         )
         # temporary delta_sqrt_price_inv to determine the actual next_sqrt_price
         delta_sqrt_price_inv = tokens_in / liquidity  # formula 6.15
         next_sqrt_price_inv = (1 / sqrt_price) + delta_sqrt_price_inv
         next_sqrt_price = max(
             1 / next_sqrt_price_inv,
-            next_tick_sqrt_price
+            sqrt_price_limit
         )
     else:
-        assert next_tick_sqrt_price > sqrt_price, (
-            'Expected next_tick_sqrt_price > sqrt_price'
+        assert sqrt_price_limit > sqrt_price, (
+            'Expected sqrt_price_limit > sqrt_price'
         )
         next_sqrt_price = min(
             sqrt_price + tokens_in / liquidity,  # formula 6.13
-            next_tick_sqrt_price
+            sqrt_price_limit
         )
 
     delta_sqrt_price = next_sqrt_price - sqrt_price
