@@ -192,13 +192,13 @@ def swap_within_tick(token, tokens_in, sqrt_price, liquidity, sqrt_price_limit):
     :param sqrt_price_limit:
     :return:
     """
-    # calculate the next_sqrt_price, limited by the next_tick_sqrt_price
-    # if next_sqrt_price is outside of next_tick_sqrt_price, then we only
+    # Calculate the next_sqrt_price, limited by the next_tick_sqrt_price.
+    # If next_sqrt_price is outside of next_tick_sqrt_price, then we only
     # execute part of the swap and cross the next tick to execute the
-    # remaining amount
+    # remaining amount.
     if token == 0:
-        assert sqrt_price_limit < sqrt_price, (
-            'Expected sqrt_price_limit < sqrt_price'
+        assert sqrt_price_limit <= sqrt_price, (
+            'Expected sqrt_price_limit <= sqrt_price'
         )
         # temporary delta_sqrt_price_inv to determine the actual next_sqrt_price
         delta_sqrt_price_inv = tokens_in / liquidity  # formula 6.15
@@ -208,8 +208,8 @@ def swap_within_tick(token, tokens_in, sqrt_price, liquidity, sqrt_price_limit):
             sqrt_price_limit
         )
     else:
-        assert sqrt_price_limit > sqrt_price, (
-            'Expected sqrt_price_limit > sqrt_price'
+        assert sqrt_price_limit >= sqrt_price, (
+            'Expected sqrt_price_limit => sqrt_price'
         )
         next_sqrt_price = min(
             sqrt_price + tokens_in / liquidity,  # formula 6.13

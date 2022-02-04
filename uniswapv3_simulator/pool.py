@@ -1,7 +1,6 @@
 import bisect
 from collections import defaultdict
 import logging
-import warnings
 
 from .tick import Tick
 from .position import PositionMap
@@ -14,7 +13,8 @@ logger = logging.getLogger('uniswap-v3.pool')
 class SwapState:
     def __init__(self):
         """
-        TODO: finish documentation
+        Container class to assist with the swap logic. Based on swap function:
+        https://github.com/Uniswap/v3-core/blob/main/contracts/UniswapV3Pool.sol
         """
         self.step_n = None
         self.amount_remaining = None
@@ -29,7 +29,8 @@ class SwapState:
 class StepComputation:
     def __init__(self):
         """
-        TODO: finish documentation
+        Container class to assist with the swap logic. Based on swap function:
+        https://github.com/Uniswap/v3-core/blob/main/contracts/UniswapV3Pool.sol
         """
         self.sqrt_price_start = None
         self.next_tick = None
@@ -59,7 +60,7 @@ class Uniswapv3Pool:
         self.sqrt_price = np.sqrt(init_price)  # sqrt(token1 / token0)
         # tick is actually the tick index (i), not the price or Tick object
         # we use this naming convention throughout (e.g., tick_lower)
-        self.tick = sqrt_price_to_tick(self.sqrt_price)  # TODO: does this need to be initialized?
+        self.tick = sqrt_price_to_tick(self.sqrt_price)
 
         # Per page 6 of the white paper: Total amount of fees that have been
         # earned per unit of virtual liquidity (L), over the entire history of
@@ -95,9 +96,11 @@ class Uniswapv3Pool:
     @property
     def virtual_reserves(self):
         """
-        TODO: finish documentation
+        Virtual reserves - values for x and y that allow you to describe the
+        contract’s behavior (between two adjacent ticks) as if it followed the
+        constant product formula (section 6.2.1 of white paper).
 
-        :return:
+        :return: float, float; virtual reserves for token0, token1
         """
         x = self.liquidity / self.sqrt_price  # formula 6.5
         y = self.liquidity * self.sqrt_price  # formula 6.6
@@ -196,8 +199,8 @@ class Uniswapv3Pool:
         # clear any ticks that are no longer needed
         # ticks will only be removed when removing liquidity
         if liquidity_delta < 0:
-            # TODO: maybe use np.isclose instead of an equality check - would
-            #  need to figure out an appropriate tol though
+            # TODO: Maybe use np.isclose instead of an equality check - would
+            #  need to figure out an appropriate tol though.
             if self.tick_map[tick_lower].liquidity_gross == 0:
                 self._del_tick(tick_lower)
                 logger.debug(
@@ -248,12 +251,18 @@ class Uniswapv3Pool:
         # determine the direction of the swap
         to_the_right = (token == 1)
 
+        # swap within in each range of initialized ticks
         while state.amount_remaining > 0:
             step = StepComputation()
             step.sqrt_price_start = state.sqrt_price
 
-            # TODO: add documentation around difference from actual implementation
-            #  as we don't move 1 tick at a time, just to the next initialized tick
+            # The actual implementation swaps one tick at a time, even if the
+            # tick is not initialized. As a simplification, we swap across
+            # uninitialized and up to each initialized tick. As long as we
+            # don't change liquidity, which only happens when we cross an
+            # initialized tick, swapping tick-to-tick is the same as swapping
+            # across multiple ticks (can try/confirm this using the
+            # swap_within_tick function)
             step.next_tick = self._get_next_tick(
                 state.tick,
                 to_the_right,
@@ -263,10 +272,9 @@ class Uniswapv3Pool:
             logger.debug(f'Next initialized tick: {step.next_tick:,}.')
             logger.debug(f'sqrt_price of next tick: {step.next_tick_sqrt_price:,.4f}.')
 
-            # check if the next tick is the min when moving to the left or
-            # max tick when moving to the right
-            # we don't want to cross a min/max tick as there is no liquidity
-            # on the other side
+            # Check if the next tick is the min when moving to the left or
+            # max tick when moving to the right. We don't want to cross a
+            # min/max tick as there is no liquidity on the other side.
             limit_tick = (
                 (step.next_tick == self.initd_ticks[0] and not to_the_right) or
                 (step.next_tick == self.initd_ticks[-1] and to_the_right)
@@ -274,8 +282,8 @@ class Uniswapv3Pool:
             if limit_tick:
                 logger.debug('Next tick is the min/max tick initialized.')
 
-            # if the current price is at the price limit, break as there is
-            # no more room to swap.
+            # if the current price is at the price limit (only happens at a
+            # limit tick), break as there is no more room to swap
             if limit_tick and (state.sqrt_price == step.next_tick_sqrt_price):
                 logger.warning(
                     f'Current price {state.sqrt_price:,.4f} is at a limit point '
@@ -284,6 +292,7 @@ class Uniswapv3Pool:
                 )
                 break
 
+            # execute the swap up to the next tick sqrt_price
             amount_remaining_less_fees = state.amount_remaining * (1 - self.fee)
             delta_token0, delta_token1, next_sqrt_price = swap_within_tick(
                 token,
@@ -292,17 +301,14 @@ class Uniswapv3Pool:
                 state.liquidity,
                 step.next_tick_sqrt_price
             )
-            if token == 0:
-                step.amount_in = delta_token0
-                step.amount_out = delta_token1
-            else:
-                step.amount_in = delta_token1
-                step.amount_out = delta_token0
+            step.amount_in = delta_token0 if token == 0 else delta_token1
+            step.amount_out = delta_token1 if token == 0 else delta_token0
 
             logger.debug('Completed swap within current tick range.')
             logger.debug(f'token{token} in: {step.amount_in:,.4f}.')
             logger.debug(f'token{1 - token} out: {step.amount_out:,.4f}.')
 
+            # update the fee amount calculations
             if next_sqrt_price != step.next_tick_sqrt_price:
                 step.fee_amount = state.amount_remaining - step.amount_in
                 # The above fee calculation should be the same as the one below,
@@ -332,15 +338,15 @@ class Uniswapv3Pool:
                 )
             logger.debug(f'Amount remaining to swap: {state.amount_remaining:,.4f}.')
 
-            # cross to the next tick if we've reached the next_tick_sqrt_price
+            # Cross to the next tick if we've reached the next_tick_sqrt_price
             # in which case the swap was only partially executed within the
-            # current tick
+            # current tick. We do not cross limit ticks as there is no liquidity
+            # on the other side of the tick.
             if not limit_tick and (state.sqrt_price == step.next_tick_sqrt_price):
                 logger.debug(f'Crossing tick {step.next_tick:,}.')
-                # add the net liquidity from the crossed tick to the current
-                # global liquidity
-                # if we're moving to the left, we interpret the liquidity_net
-                # as the opposite sign: row 720 of
+                # Add the net liquidity from the crossed tick to the current
+                # global liquidity. If we're moving to the left, we interpret
+                # the liquidity_net as the opposite sign: row 720 of
                 # https://github.com/Uniswap/v3-core/blob/main/contracts/UniswapV3Pool.sol
                 tick_liquidity_net = self.tick_map[step.next_tick].liquidity_net
                 if not to_the_right:
@@ -355,13 +361,13 @@ class Uniswapv3Pool:
                     self.fee_growth_global1 if token == 0 else state.fee_growth_global_token_in
                 )
 
-            # update the current tick
+            # update the current tick and swap step
             state.tick = sqrt_price_to_tick(state.sqrt_price)
+            state.step_n += 1
 
             logger.debug(f'Current tick: {state.tick:,}.')
             logger.debug(f'Current sqrt_price: {state.sqrt_price:,.4f}.')
             logger.debug(f'Current liquidity: {state.liquidity:,.2f}')
-            state.step_n += 1
 
         logger.debug('Swap complete.')
         # once the swap is completed, update pool for the swap and return the
@@ -377,6 +383,7 @@ class Uniswapv3Pool:
             self.fee_growth_global0 = state.fee_growth_global_token_in
             self.total_fees_token0 += state.total_fees
 
+            # unlike Uniswap v2, fees are not added to the pool
             token0_to_pool = amount_token0 - state.total_fees
             token1_to_pool = amount_token1
         else:
@@ -386,6 +393,7 @@ class Uniswapv3Pool:
             self.total_fees_token1 += state.total_fees
 
             token0_to_pool = amount_token0
+            # unlike Uniswap v2, fees are not added to the pool
             token1_to_pool = amount_token1 - state.total_fees
 
         self.token0 += token0_to_pool
@@ -399,13 +407,55 @@ class Uniswapv3Pool:
 
         return -amount_token0, -amount_token1
 
-    def collect_fees_earned(self):
-        # extract the tokens_owed{0,1} from the position (and the pool)
-        raise NotImplementedError
+    def collect_fees_earned(self, position_tuple, amount_token0, amount_token1):
+        """
+        TODO: finish documentation
+        TODO: Need a helper function for simply updating tokens_owed{0,1} in
+          the position object as they are only updated during the set_position
+          function.
+
+        :param position_tuple:
+        :param amount_token0:
+        :param amount_token1:
+        :return:
+        """
+        position = self.position_map[position_tuple]
+
+        # TODO: maybe move these check into a separate function?
+        # ensure that we are not trying to collect more fees than the fees owed
+        # to the position
+        assert amount_token0 <= position.tokens_owed0, (
+            f'Cannot collect more than the fees owed '
+            f'{position.tokens_owed0:,.4f}.'
+        )
+        assert amount_token1 <= position.tokens_owed1, (
+            f'Cannot collect more than the fees owed '
+            f'{position.tokens_owed1:,.4f}.'
+        )
+        # ensure that there are enough tokens in the pool
+        assert amount_token0 <= self.total_fees_token0, (
+            f'Pool does not have enough tokens to meet the request '
+            f'{self.total_fees_token0:,.4f}.'
+        )
+        assert amount_token1 <= self.total_fees_token1, (
+            f'Pool does not have enough tokens to meet the request '
+            f'{self.total_fees_token1:,.4f}.'
+        )
+        # remove tokens from the pool
+        self.total_fees_token0 -= amount_token0
+        self.total_fees_token1 -= amount_token1
+
+        # reduce fees owed in the position
+        position.tokens_owed0 -= amount_token0
+        position.tokens_owed1 -= amount_token1
+
+        return amount_token0, amount_token1
 
     def _init_tick(self, i):
         """
-        TODO: finish documentation
+        Initialize a tick and add it to the tick tracking objects, initd_ticks
+        and tick_map. We keep initd_ticks sorted so that we can easily check
+        the next tick to each direction).
 
         :param i: int; tick index.
         """
@@ -423,7 +473,10 @@ class Uniswapv3Pool:
 
     def _del_tick(self, i):
         """
-        TODO: finish documentation
+        Delete a tick and remove it from tracking objects, initd_ticks and
+        tick_map. This should only be done when a tick no longer has liquidity
+        referencing it; this check is done in the set_position function and NOT
+        verified here.
 
         :param i: int; tick index.
         """
@@ -432,12 +485,23 @@ class Uniswapv3Pool:
 
     def _get_next_tick(self, current_tick, to_the_right, first_call=False):
         """
-        TODO: finish documentation
+        Get the next initialized tick to the left or right of the current tick.
+        Since each tick is a lower bound for a range, the next initialized tick
+        may actually be the current tick when moving to the left. We only want
+        to get the current tick as the next tick in two cases:
+        1. The first time _get_next_tick is called we want to return the current
+          tick when moving to the left so that we ensure that we cross the
+          current tick (if required).
+        2. When we are at a limit tick (i.e., min/max tick), we return the
+          current tick as there are no initialized ticks on the other side.
 
-        :param current_tick:
-        :param to_the_right:
-        :param first_call:
-        :return:
+        :param current_tick: int; current tick for which to reference the
+          next tick.
+        :param to_the_right: bool; whether to get the next tick to the right
+          (or, if False, left) of the current tick.
+        :param first_call: bool; whether this is the first call to the function.
+        :return: int; next initialized tick to the right/left of the current
+          tick.
         """
         if to_the_right:
             next_idx = bisect.bisect_right(self.initd_ticks, current_tick)
@@ -448,12 +512,12 @@ class Uniswapv3Pool:
                 return self.initd_ticks[next_idx]
         else:
             next_idx = bisect.bisect_left(self.initd_ticks, current_tick)
-            # handle cases when the price is above the current tick and the
-            # current tick is initialized and may need to be crossed
-            # this would only happen for the first call to _get_next_tick
-            # when executing a swap
-            # if current_tick is the max tick, though, we don't want to return
-            # the max tick as we need to move to the left
+            # Handle cases when the price is above the current tick and the
+            # current tick is initialized and may need to be crossed.
+            # This would only happen for the first call to _get_next_tick
+            # when executing a swap. If current_tick is the max tick, though,
+            # we don't want to return the max tick as we need to move to
+            # the left.
             if first_call and (current_tick in self.initd_ticks[:-1]):
                 return current_tick
             # handle the min tick
@@ -461,28 +525,6 @@ class Uniswapv3Pool:
                 return self.initd_ticks[0]
             else:
                 return self.initd_ticks[next_idx - 1]
-
-    @staticmethod
-    def _check_swap_values(tokens_in, total_delta_token, partial_swap):
-        """
-        TODO: finish documentation
-
-        :param tokens_in:
-        :param total_delta_token:
-        :param partial_swap:
-        :return:
-        """
-        if not partial_swap:
-            assert np.isclose(tokens_in, total_delta_token,
-                              atol=1e-12, rtol=1e-8), (
-                'total_delta_token0 does not match tokens_in for a '
-                'complete swap.'
-            )
-        else:
-            assert total_delta_token < tokens_in, (
-                'total_delta_token0 should be less than tokens_in for a '
-                'partial swap.'
-            )
 
     def __repr__(self):
         return (
