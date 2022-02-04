@@ -176,3 +176,36 @@ def get_uniswapv3_counts(api_key=None, pool_address=None, transaction='swaps',
         return None
     else:
         raise_api_error(response)
+
+
+def get_transaction(api_key=None, tx_hash=None, chain=1,
+                    n_attempts=10, retry_codes=(507,)):
+    endpoint = f'/v1/{chain}/transaction_v2/{tx_hash}/'
+    url = BASE_URL + endpoint
+
+    args = [url]
+    kwargs = {'auth': (api_key, '')}
+    response = try_n_gets(n=n_attempts, retry_codes=retry_codes,
+                          get_args=args, get_kwargs=kwargs)
+
+    if response.ok:
+        content = response.json()
+        if content['data']['pagination'] is not None:
+            logger.warning(
+                f"Expected pagination to be None, got {content['pagination']}."
+            )
+        if len(content['data']['items']) > 1:
+            logger.warning(
+                f"Expected only one data in 'items', got "
+                f"{len(content['data']['items']):,}."
+            )
+        return content['data']['items'][0]
+    elif response.status_code in retry_codes:  # happens when all attempts fail
+        logger.warning(
+            f"Could not request page count data after {n_attempts} attempts. "
+            f"None was returned."
+        )
+        return None
+    else:
+        raise_api_error(response)
+
