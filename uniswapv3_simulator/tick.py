@@ -7,8 +7,8 @@ logger = logging.getLogger('uniswap-v3.tick')
 
 
 # These are very small and very large numbers, so it is highly unlikely
-# we'd ever get to this point. However, we don't have support for prices
-# hitting either the min or max
+# we'd ever get to this point. However, this gives us a good proxy for when
+# we want to provide liquidity along the entire curve; i.e., [0, infty).
 MIN_TICK = -887272
 MAX_TICK = -MIN_TICK
 
@@ -43,6 +43,10 @@ class Tick:
             f'Tick {self.i:,} initialized (sqrt_price={self.sqrt_price:,.4f}).'
         )
 
+    @property
+    def price(self):
+        return self.sqrt_price ** 2
+
     def update_liquidity(self, liquidity_delta, upper):
         """
         TODO: update documentation
@@ -76,4 +80,4 @@ class Tick:
         logger.debug(f'Fee growth outside token1 updated: {self.fee_growth_outside1:,.8f}.')
 
     def __repr__(self):
-        return f"Tick(i={self.i:,.0f}, price={self.sqrt_price ** 2:,.4f})"
+        return f"Tick(i={self.i:,.0f}, price={self.price:,.4f})"
