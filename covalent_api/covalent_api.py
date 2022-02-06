@@ -62,7 +62,7 @@ def get_covalent_data(api_key, endpoint, params=None,
     while has_more:
         params['page-number'] = i
         args = [url]
-        kwargs = {'auth': (api_key, ''), 'params': params}
+        kwargs = {'auth': (api_key, ''), 'params': params, 'timeout': 10}
         response = try_n_gets(n=n_attempts, retry_codes=retry_codes,
                               get_args=args, get_kwargs=kwargs)
 
@@ -161,12 +161,13 @@ def get_uniswapv3_counts(api_key=None, pool_address=None, transaction='swaps',
     params = {'page-size': 1, 'page-number': 0}
 
     args = [url]
-    kwargs = {'auth': (api_key, ''), 'params': params}
+    kwargs = {'auth': (api_key, ''), 'params': params, 'timeout': 10}
     response = try_n_gets(n=n_attempts, retry_codes=retry_codes,
                           get_args=args, get_kwargs=kwargs)
 
     if response.ok:
         content = response.json()
+        logger.debug(f'Queried endpoint: {endpoint}')
         return content['data']['pagination']['total_count']
     elif response.status_code in retry_codes:  # happens when all attempts fail
         logger.warning(
@@ -184,19 +185,20 @@ def get_transaction(api_key=None, tx_hash=None, chain=1,
     url = BASE_URL + endpoint
 
     args = [url]
-    kwargs = {'auth': (api_key, '')}
+    kwargs = {'auth': (api_key, ''), 'timeout': 10}
     response = try_n_gets(n=n_attempts, retry_codes=retry_codes,
                           get_args=args, get_kwargs=kwargs)
 
     if response.ok:
         content = response.json()
+        logger.debug(f'Queried endpoint: {endpoint}')
         if content['data']['pagination'] is not None:
             logger.warning(
                 f"Expected pagination to be None, got {content['pagination']}."
             )
         if len(content['data']['items']) > 1:
             logger.warning(
-                f"Expected only one data in 'items', got "
+                f"Expected only one entry in 'items', got "
                 f"{len(content['data']['items']):,}."
             )
         return content['data']['items'][0]

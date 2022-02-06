@@ -3,26 +3,6 @@ import numpy as np
 from .math import *
 
 
-def amount_to_float(amount, decimals):
-    """
-    TODO: finish documentation
-
-    :param amount:
-    :param decimals:
-    :return:
-    """
-    if len(amount) <= decimals:
-        if amount.startswith('-'):
-            sign = -1
-            amount = amount[1:]
-        else:
-            sign = 1
-        amount = amount.rjust(18, '0')  # pad to 18 digits
-        return float('.' + amount) * sign
-    else:
-        return float(amount[:-18] + '.' + amount[-18:])
-
-
 def pool_init_price(token0, token1, tick_upper, tick_lower, liquidity_delta):
     """
     TODO: finish documentation
