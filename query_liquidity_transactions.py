@@ -21,15 +21,18 @@ def main(raw_data, output_file):
 
     all_data = {}
     for pool, dset in data.items():
-        removes = dset['liquidity'].loc[dset['liquidity']['liquidity_event'] == 'REMOVE_LIQUIDITY', :]
-        tx_hashes = removes['tx_hash'].unique()
+        tx_hashes = dset['liquidity']['tx_hash'].unique()
         pool_data = {}
 
         for tx_hash in tx_hashes:
             while True:
                 try:
-                    tx_data = get_transaction(api_key=API_KEY, tx_hash=tx_hash,
-                                              n_attempts=1, retry_codes=tuple())
+                    tx_data = get_transaction(
+                        api_key=API_KEY,
+                        tx_hash=tx_hash,
+                        n_attempts=1,
+                        retry_codes=tuple()
+                    )
                     break
                 except (APIError, requests.exceptions.Timeout) as e:
                     logger.warning(f"{type(e).__name__}: {e}.")

@@ -121,6 +121,10 @@ class Uniswapv3Pool:
           received (positive values) to update the position. Does NOT include
           any fees earned when removing liquidity from the position.
         """
+        logger.debug(
+            f'Adding {liquidity_delta:,.2f} to position ({account_id}, '
+            f'{tick_lower:,}, {tick_upper:,}).'
+        )
         # initialize ticks if needed
         if tick_lower not in self.initd_ticks:
             self._init_tick(tick_lower)
@@ -310,16 +314,10 @@ class Uniswapv3Pool:
 
             # update the fee amount calculations
             if next_sqrt_price != step.next_tick_sqrt_price:
+                # This fee calculation should be the same as the one below (in
+                # the else block), but this one avoids rounding issues when
+                # determining amount_remaining.
                 step.fee_amount = state.amount_remaining - step.amount_in
-                # The above fee calculation should be the same as the one below,
-                # but this one avoids rounding issues when determining
-                # amount_remaining. We verify that they are effectively the
-                # the same though to ensure consistency.
-                check_fee_amount = step.amount_in / (1 - self.fee) * self.fee
-                assert np.isclose(step.fee_amount, check_fee_amount), (
-                    f'Calculated fees do not match: {step.fee_amount:,.4f} '
-                    f'vs. {check_fee_amount:,.4f}.'
-                )
             else:
                 step.fee_amount = step.amount_in / (1 - self.fee) * self.fee
 
@@ -360,9 +358,21 @@ class Uniswapv3Pool:
                     state.fee_growth_global_token_in if token == 0 else self.fee_growth_global0,
                     self.fee_growth_global1 if token == 0 else state.fee_growth_global_token_in
                 )
+                # Due to rounding sqrt_price_to_tick(tick_to_sqrt_price(tick)) != tick
+                # for any ticks < 0. Rounding is really only an issue when we
+                # are very close to the edges of a tick, which, by definition,
+                # happens when crossing a tick. Therefore, instead of selecting
+                # the next stick using sqrt_price_to_tick, we just use the
+                # already calculated next tick
+                state.tick = step.next_tick
+            else:
+                # We have to use the sqrt_price_to_tick function here as if
+                # state.sqrt_price == step.next_tick_sqrt_price, then we didn't
+                # make it to the next tick and the current tick could be any
+                # tick between the start tick and next tick.
+                state.tick = sqrt_price_to_tick(state.sqrt_price)
 
-            # update the current tick and swap step
-            state.tick = sqrt_price_to_tick(state.sqrt_price)
+            # update the swap step
             state.step_n += 1
 
             logger.debug(f'Current tick: {state.tick:,}.')
