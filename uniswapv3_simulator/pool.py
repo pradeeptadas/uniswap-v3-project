@@ -1,3 +1,5 @@
+import numpy as np
+import matplotlib.pyplot as plt
 import bisect
 from collections import defaultdict
 import logging
@@ -460,6 +462,57 @@ class Uniswapv3Pool:
         position.tokens_owed1 -= amount_token1
 
         return amount_token0, amount_token1
+
+    def liquidity_curve(self, p):
+        """
+        TODO: finish documenttion
+
+        :param p:
+        :return:
+        """
+        liquidity_delta = defaultdict(lambda: 0)
+        for k, position in self.position_map.items():
+            tick_lower = self.tick_map[position.tick_lower]
+            tick_upper = self.tick_map[position.tick_upper]
+
+            liquidity_delta[tick_lower.sqrt_price ** 2] += position.liquidity
+            liquidity_delta[tick_upper.sqrt_price ** 2] -= position.liquidity
+
+        liquidity_delta = np.array(list(liquidity_delta.items()))
+        liquidity_delta = liquidity_delta[liquidity_delta[:, 0].argsort()]
+
+        liquidity_points = liquidity_delta
+        liquidity_points[:, 1] = liquidity_delta[:, 1].cumsum()
+        liquidity_points = np.insert(liquidity_points, 0, [-np.inf, 0], axis=0)
+        assert liquidity_points[-1, -1] == 0, 'Last value of liquidity != 0.'
+
+        return liquidity_points[liquidity_points[:, 0] < p, 1][-1]
+
+    def plot_liquidity_curve(self, ax=None):
+        """
+        TODO: finish documenttion
+
+        :param ax:
+        :return:
+        """
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(20, 8))
+
+        extra = 0.1
+        p_min = tick_to_sqrt_price(self.initd_ticks[0]) ** 2 * (1 - extra)
+        p_min = 0 if p_min < 10 else p_min
+        p_max = tick_to_sqrt_price(self.initd_ticks[-2]) ** 2 * (1 + extra)
+        n_points = 1000
+
+        p = np.linspace(p_min, p_max, n_points)
+        l = np.array([self.liquidity_curve(pi) for pi in p])
+
+        ax.plot(p, l, drawstyle='steps')
+        ax.set_title('Liquidity Curve')
+        ax.set_xlabel('Price (p)')
+        ax.set_ylabel('Liquidity (L)')
+
+        return ax
 
     def _init_tick(self, i):
         """
