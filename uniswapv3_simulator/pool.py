@@ -43,7 +43,8 @@ class StepComputation:
 
 
 class Uniswapv3Pool:
-    def __init__(self, fee, tick_spacing, init_price):
+    def __init__(self, fee, tick_spacing, init_price,
+                 token0_decimals=18, token1_decimals=18):
         """
         TODO: finish documentation
         For simplicity, we assume no protocol fees. Currently, no pools have
@@ -54,6 +55,8 @@ class Uniswapv3Pool:
           representation; e.g., fee=0.003 is a 0.3% fee.
         :param tick_spacing:
         :param init_price:
+        :param token0_decimals:
+        :param token1_decimals:
         """
         self.fee = fee
         self.tick_spacing = tick_spacing
@@ -63,6 +66,10 @@ class Uniswapv3Pool:
         # tick is actually the tick index (i), not the price or Tick object
         # we use this naming convention throughout (e.g., tick_lower)
         self.tick = sqrt_price_to_tick(self.sqrt_price)
+
+        # multipliers for when decimals for each token are not the same
+        self.token0_multiplier = 10.0 ** max(token1_decimals - token0_decimals, 0)
+        self.token1_multiplier = 10.0 ** max(token0_decimals - token1_decimals, 0)
 
         # Per page 6 of the white paper: Total amount of fees that have been
         # earned per unit of virtual liquidity (L), over the entire history of
@@ -93,7 +100,11 @@ class Uniswapv3Pool:
 
     @property
     def price(self):
-        return self.sqrt_price ** 2  # p = token1 / token0
+        # p = token1 / token0
+        return (
+            self.sqrt_price ** 2 *
+            (self.token1_multiplier / self.token0_multiplier)
+        )
 
     @property
     def virtual_reserves(self):
@@ -107,7 +118,7 @@ class Uniswapv3Pool:
         x = self.liquidity / self.sqrt_price  # formula 6.5
         y = self.liquidity * self.sqrt_price  # formula 6.6
 
-        return x, y
+        return x * self.token0_multiplier, y * self.token1_multiplier
 
     def set_position(self, account_id, tick_lower, tick_upper, liquidity_delta):
         """
@@ -124,7 +135,7 @@ class Uniswapv3Pool:
           any fees earned when removing liquidity from the position.
         """
         logger.debug(
-            f'Adding {liquidity_delta:,.2f} to position ({account_id}, '
+            f'Adding {liquidity_delta:,.6e} to position ({account_id}, '
             f'{tick_lower:,}, {tick_upper:,}).'
         )
         # initialize ticks if needed
@@ -153,13 +164,14 @@ class Uniswapv3Pool:
             tick_upper,
             at_max_tick=(self.tick == self.initd_ticks[-1])
         )
-        logger.debug(f'token0 fee growth inside position range: {fee_growth_inside0:,.8f}.')
-        logger.debug(f'token1 fee growth inside position range: {fee_growth_inside1:,.8f}.')
+        logger.debug(f'token0 fee growth inside position range: {fee_growth_inside0:,.6e}.')
+        logger.debug(f'token1 fee growth inside position range: {fee_growth_inside1:,.6e}.')
 
         # get/initialize the position and update it for liquidity_delta
         position = self.position_map[(account_id, tick_lower, tick_upper)]
         self.account_map[account_id].add(position)
-        position.update(liquidity_delta, fee_growth_inside0, fee_growth_inside1)
+        position.update(liquidity_delta, fee_growth_inside0, fee_growth_inside1,
+                        self.token0_multiplier, self.token1_multiplier)
 
         # update the lower and upper ticks for liquidity_delta
         self.tick_map[tick_lower].update_liquidity(liquidity_delta, False)
@@ -174,7 +186,7 @@ class Uniswapv3Pool:
         if sqrt_price_lower <= self.sqrt_price <= sqrt_price_upper:
             self.liquidity += liquidity_delta
             logger.debug(f'liquidity_delta added to liquidity.')
-            logger.debug(f'Updated liquidity: {self.liquidity:,.2f}.')
+            logger.debug(f'Updated liquidity: {self.liquidity:,.6e}.')
 
         # calculate the amount of token0 and token1 to be deposited into the pool
         # negative values indicate that tokens are removed from the pool
@@ -187,7 +199,8 @@ class Uniswapv3Pool:
             self.tick,
             tick_lower,
             tick_upper
-        )
+        ) * self.token0_multiplier
+
         delta_token1 = get_delta_token1(
             liquidity_delta,
             self.sqrt_price,
@@ -196,11 +209,12 @@ class Uniswapv3Pool:
             self.tick,
             tick_lower,
             tick_upper
-        )
+        ) * self.token1_multiplier
+
         self.token0 += delta_token0
         self.token1 += delta_token1
-        logger.debug(f'token0 added to/removed from pool: {delta_token0:,.4f}')
-        logger.debug(f'token1 added to/removed from pool: {delta_token1:,.4f}')
+        logger.debug(f'token0 added to/removed from pool: {delta_token0:,.6e}')
+        logger.debug(f'token1 added to/removed from pool: {delta_token1:,.6e}')
 
         # clear any ticks that are no longer needed
         # ticks will only be removed when removing liquidity
@@ -235,7 +249,11 @@ class Uniswapv3Pool:
         assert self.liquidity > 0, f"Cannot swap if pool has 0 liquidity."
         assert token in (0, 1), f"token must be 0 or 1, not {token}."
         assert tokens_in > 0, f"tokens_in must be greater than 0."
-        logger.debug(f'Swapping {tokens_in:,.4f} of token{token}.')
+        logger.debug(f'Swapping {tokens_in:,.6e} of token{token}.')
+
+        multiplier = self.token0_multiplier if token == 0 else self.token1_multiplier
+        tokens_in = tokens_in / multiplier
+        logger.debug(f'Scaling token{token} to {tokens_in:,.6e}.')
 
         # setup the swap state
         state = SwapState()
@@ -251,8 +269,8 @@ class Uniswapv3Pool:
         state.liquidity = self.liquidity
 
         logger.debug(f'Starting tick: {state.tick:,}.')
-        logger.debug(f'Starting sqrt_price: {state.sqrt_price:,.4f}.')
-        logger.debug(f'Starting liquidity: {state.liquidity:,.2f}.')
+        logger.debug(f'Starting sqrt_price: {state.sqrt_price:,.6e}.')
+        logger.debug(f'Starting liquidity: {state.liquidity:,.6e}.')
 
         # determine the direction of the swap
         to_the_right = (token == 1)
@@ -276,7 +294,7 @@ class Uniswapv3Pool:
             )
             step.next_tick_sqrt_price = self.tick_map[step.next_tick].sqrt_price
             logger.debug(f'Next initialized tick: {step.next_tick:,}.')
-            logger.debug(f'sqrt_price of next tick: {step.next_tick_sqrt_price:,.4f}.')
+            logger.debug(f'sqrt_price of next tick: {step.next_tick_sqrt_price:,.6e}.')
 
             # Check if the next tick is the min when moving to the left or
             # max tick when moving to the right. We don't want to cross a
@@ -292,8 +310,8 @@ class Uniswapv3Pool:
             # limit tick), break as there is no more room to swap
             if limit_tick and (state.sqrt_price == step.next_tick_sqrt_price):
                 logger.warning(
-                    f'Current price {state.sqrt_price:,.4f} is at a limit point '
-                    f'{step.next_tick_sqrt_price:,.4f}. The swap may only be '
+                    f'Current price {state.sqrt_price:,.6e} is at a limit point '
+                    f'{step.next_tick_sqrt_price:,.6e}. The swap may only be '
                     f'partially executed.'
                 )
                 break
@@ -311,8 +329,8 @@ class Uniswapv3Pool:
             step.amount_out = delta_token1 if token == 0 else delta_token0
 
             logger.debug('Completed swap within current tick range.')
-            logger.debug(f'token{token} in: {step.amount_in:,.4f}.')
-            logger.debug(f'token{1 - token} out: {step.amount_out:,.4f}.')
+            logger.debug(f'token{token} in: {step.amount_in:,.6e}.')
+            logger.debug(f'token{1 - token} out: {step.amount_out:,.6e}.')
 
             # update the fee amount calculations
             if next_sqrt_price != step.next_tick_sqrt_price:
@@ -324,7 +342,7 @@ class Uniswapv3Pool:
                 step.fee_amount = step.amount_in / (1 - self.fee) * self.fee
 
             state.total_fees += step.fee_amount
-            logger.debug(f'Fees earned (in token{token}): {step.fee_amount:.4f}')
+            logger.debug(f'Fees earned (in token{token}): {step.fee_amount:.6e}')
 
             state.amount_remaining -= (step.amount_in + step.fee_amount)
             state.amount_calculated += step.amount_out
@@ -333,10 +351,10 @@ class Uniswapv3Pool:
             if state.liquidity > 0:
                 state.fee_growth_global_token_in += step.fee_amount / state.liquidity
                 logger.debug(
-                    f'{step.fee_amount / state.liquidity:,.8f} added to '
+                    f'{step.fee_amount / state.liquidity:,.6e} added to '
                     f'fee_growth_global{token}.'
                 )
-            logger.debug(f'Amount remaining to swap: {state.amount_remaining:,.4f}.')
+            logger.debug(f'Amount remaining to swap: {state.amount_remaining:,.6e}.')
 
             # Cross to the next tick if we've reached the next_tick_sqrt_price
             # in which case the swap was only partially executed within the
@@ -353,7 +371,7 @@ class Uniswapv3Pool:
                     tick_liquidity_net *= -1
                 state.liquidity += tick_liquidity_net
                 assert state.liquidity >= 0, 'liquidity cannot be < 0.'
-                logger.debug(f'Liquidity added from tick: {tick_liquidity_net:,.2f}')
+                logger.debug(f'Liquidity added from tick: {tick_liquidity_net:,.6e}')
 
                 # update fee growth outside for the crossed tick
                 self.tick_map[step.next_tick].update_fee_growth_outside(
@@ -378,8 +396,8 @@ class Uniswapv3Pool:
             state.step_n += 1
 
             logger.debug(f'Current tick: {state.tick:,}.')
-            logger.debug(f'Current sqrt_price: {state.sqrt_price:,.4f}.')
-            logger.debug(f'Current liquidity: {state.liquidity:,.2f}')
+            logger.debug(f'Current sqrt_price: {state.sqrt_price:,.6e}.')
+            logger.debug(f'Current liquidity: {state.liquidity:,.6e}')
 
         logger.debug('Swap complete.')
         # once the swap is completed, update pool for the swap and return the
@@ -408,14 +426,22 @@ class Uniswapv3Pool:
             # unlike Uniswap v2, fees are not added to the pool
             token1_to_pool = amount_token1 - state.total_fees
 
+        # ensure that tokens have the correct decimal places
+        amount_token0 = amount_token0 * self.token0_multiplier
+        amount_token1 = amount_token1 * self.token1_multiplier
+        token0_to_pool = token0_to_pool * self.token0_multiplier
+        token1_to_pool = token1_to_pool * self.token1_multiplier
+        logger.debug(f'Scaling token0 to {token0_to_pool:,.6e}.')
+        logger.debug(f'Scaling token1 to {token1_to_pool:,.6e}.')
+
         self.token0 += token0_to_pool
         self.token1 += token1_to_pool
 
-        logger.debug(f'Total fees earned in token{token}: {state.total_fees:,.4f}.')
-        logger.debug(f'Total token0 added to/removed from pool: {token0_to_pool:,.4f}')
-        logger.debug(f'Total token1 added to/removed from pool: {token1_to_pool:,.4f}')
-        logger.debug(f'Final token0 in pool: {self.token0:,.4f}')
-        logger.debug(f'Final token1 in pool: {self.token1:,.4f}')
+        logger.debug(f'Total fees earned in token{token}: {state.total_fees:,.6e}.')
+        logger.debug(f'Total token0 added to/removed from pool: {token0_to_pool:,.6e}')
+        logger.debug(f'Total token1 added to/removed from pool: {token1_to_pool:,.6e}')
+        logger.debug(f'Final token0 in pool: {self.token0:,.6e}')
+        logger.debug(f'Final token1 in pool: {self.token1:,.6e}')
 
         return -amount_token0, -amount_token1
 
@@ -438,20 +464,20 @@ class Uniswapv3Pool:
         # to the position
         assert amount_token0 <= position.tokens_owed0, (
             f'Cannot collect more than the fees owed '
-            f'{position.tokens_owed0:,.4f}.'
+            f'{position.tokens_owed0:,.6e}.'
         )
         assert amount_token1 <= position.tokens_owed1, (
             f'Cannot collect more than the fees owed '
-            f'{position.tokens_owed1:,.4f}.'
+            f'{position.tokens_owed1:,.6e}.'
         )
         # ensure that there are enough tokens in the pool
         assert amount_token0 <= self.total_fees_token0, (
             f'Pool does not have enough tokens to meet the request '
-            f'{self.total_fees_token0:,.4f}.'
+            f'{self.total_fees_token0:,.6e}.'
         )
         assert amount_token1 <= self.total_fees_token1, (
             f'Pool does not have enough tokens to meet the request '
-            f'{self.total_fees_token1:,.4f}.'
+            f'{self.total_fees_token1:,.6e}.'
         )
         # remove tokens from the pool
         self.total_fees_token0 -= amount_token0
@@ -591,7 +617,7 @@ class Uniswapv3Pool:
 
     def __repr__(self):
         return (
-            f"Pool(price={self.price:,.4f}, "
-            f"liquidity={self.liquidity:,.2f}, "
+            f"Pool(price={self.price:,.6e}, "
+            f"liquidity={self.liquidity:,.6e}, "
             f"fee={self.fee:.2%})"
         )

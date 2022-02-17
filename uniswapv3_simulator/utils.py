@@ -3,7 +3,8 @@ import numpy as np
 from .math import *
 
 
-def pool_init_price(token0, token1, tick_upper, tick_lower, liquidity_delta):
+def pool_init_price(token0, token1, tick_upper, tick_lower, liquidity_delta,
+                    token0_decimals, token1_decimals):
     """
     TODO: finish documentation
 
@@ -13,12 +14,21 @@ def pool_init_price(token0, token1, tick_upper, tick_lower, liquidity_delta):
     :param tick_lower:
     :param liquidity_delta: Can get from etherscan.io using the txn hash
       (check the logs).
+    :param token0_decimals:
+    :param token1_decimals:
     :return:
     """
     if (token0 == 0) or (token1 == 0):
         raise ValueError('Tick range does not span the initial price.')
     sqrt_price_lower = tick_to_sqrt_price(tick_lower)
     sqrt_price_upper = tick_to_sqrt_price(tick_upper)
+
+    # adjust tokens if different decimal conventions are used
+    token0_multiplier = 10.0 ** max(token1_decimals - token0_decimals, 0)
+    token1_multiplier = 10.0 ** max(token0_decimals - token1_decimals, 0)
+
+    token0 = token0 / token0_multiplier
+    token1 = token1 / token1_multiplier
 
     # formula 6.29
     sqrt_price = token1 / liquidity_delta + sqrt_price_lower
@@ -34,7 +44,8 @@ def pool_init_price(token0, token1, tick_upper, tick_lower, liquidity_delta):
 
 
 def solve_for_liquidity_delta(token0, token1, tick_lower, tick_upper,
-                              sqrt_price, check_res=False):
+                              sqrt_price, token0_decimals, token1_decimals,
+                              check_res=False):
     """
     TODO: finish documentation
 
@@ -44,11 +55,20 @@ def solve_for_liquidity_delta(token0, token1, tick_lower, tick_upper,
     :param tick_upper:
     :param sqrt_price:
     :param check_res:
+    :param token0_decimals:
+    :param token1_decimals:
     :return:
     """
     sqrt_price_lower = tick_to_sqrt_price(tick_lower)
     sqrt_price_upper = tick_to_sqrt_price(tick_upper)
     tick_current = sqrt_price_to_tick(sqrt_price)
+
+    # adjust tokens if different decimal conventions are used
+    token0_multiplier = 10.0 ** max(token1_decimals - token0_decimals, 0)
+    token1_multiplier = 10.0 ** max(token0_decimals - token1_decimals, 0)
+
+    token0 = token0 / token0_multiplier
+    token1 = token1 / token1_multiplier
 
     if tick_current < tick_lower:
         assert token1 == 0, f'Expected token1 to be 0, not {token1:,.4f}.'
