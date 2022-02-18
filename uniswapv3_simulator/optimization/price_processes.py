@@ -1,5 +1,4 @@
-# TODO: might move this to a separate packege if it doesn't use the other
-#  Uniswap code
+# TODO: might remove this - not sure if it will be used
 import numpy as np
 from collections import deque
 # TODO: add documentation and logging throughout
