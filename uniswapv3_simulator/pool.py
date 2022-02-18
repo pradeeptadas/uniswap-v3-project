@@ -310,9 +310,9 @@ class Uniswapv3Pool:
             # limit tick), break as there is no more room to swap
             if limit_tick and (state.sqrt_price == step.next_tick_sqrt_price):
                 logger.warning(
-                    f'Current price {state.sqrt_price:,.6e} is at a limit point '
-                    f'{step.next_tick_sqrt_price:,.6e}. The swap may only be '
-                    f'partially executed.'
+                    f'Current price {state.sqrt_price:,.6e} is at a limit '
+                    f'point {step.next_tick_sqrt_price:,.6e}. The swap may '
+                    f'only be partially executed.'
                 )
                 break
 
@@ -437,48 +437,48 @@ class Uniswapv3Pool:
         self.token0 += token0_to_pool
         self.token1 += token1_to_pool
 
+        if token == 0:
+            logger.debug(f'Swapped {amount_token0:,.6e} token0 for {-amount_token1:,.6e} token1.')
+        else:
+            logger.debug(f'Swapped {amount_token1:,.6e} token1 for {-amount_token0:,.6e} token0.')
         logger.debug(f'Total fees earned in token{token}: {state.total_fees:,.6e}.')
-        logger.debug(f'Total token0 added to/removed from pool: {token0_to_pool:,.6e}')
-        logger.debug(f'Total token1 added to/removed from pool: {token1_to_pool:,.6e}')
         logger.debug(f'Final token0 in pool: {self.token0:,.6e}')
         logger.debug(f'Final token1 in pool: {self.token1:,.6e}')
 
         return -amount_token0, -amount_token1
 
-    def collect_fees_earned(self, position_tuple, amount_token0, amount_token1):
+    def collect_fees_earned(self, account_id, tick_lower, tick_upper):
         """
         TODO: finish documentation
         TODO: Need a helper function for simply updating tokens_owed{0,1} in
           the position object as they are only updated during the set_position
           function.
 
-        :param position_tuple:
-        :param amount_token0:
-        :param amount_token1:
+        :param account_id:
+        :param tick_lower:
+        :param tick_upper
         :return:
         """
-        position = self.position_map[position_tuple]
+        logger.debug(
+            f'Collecting fees for position ({account_id}, {tick_lower:,}, '
+            f'{tick_upper:,}).'
+        )
+        position = self.position_map[(account_id, tick_lower, tick_upper)]
 
-        # TODO: maybe move these check into a separate function?
-        # ensure that we are not trying to collect more fees than the fees owed
-        # to the position
-        assert amount_token0 <= position.tokens_owed0, (
-            f'Cannot collect more than the fees owed '
-            f'{position.tokens_owed0:,.6e}.'
-        )
-        assert amount_token1 <= position.tokens_owed1, (
-            f'Cannot collect more than the fees owed '
-            f'{position.tokens_owed1:,.6e}.'
-        )
-        # ensure that there are enough tokens in the pool
-        assert amount_token0 <= self.total_fees_token0, (
-            f'Pool does not have enough tokens to meet the request '
-            f'{self.total_fees_token0:,.6e}.'
-        )
-        assert amount_token1 <= self.total_fees_token1, (
-            f'Pool does not have enough tokens to meet the request '
-            f'{self.total_fees_token1:,.6e}.'
-        )
+        amount_token0 = position.tokens_owed0
+        amount_token1 = position.tokens_owed1
+        logger.debug(f'token0 fees owed: {amount_token0:,.6e}')
+        logger.debug(f'token1 fees owed: {amount_token1:,.6e}')
+
+        # limit tokens removed to amounts in pool fees
+        if amount_token0 > self.total_fees_token0:
+            logger.warning(f'Pool only has {self.total_fees_token0:,.6e} of token0.')
+            amount_token0 = self.total_fees_token0
+
+        if amount_token1 > self.total_fees_token1:
+            logger.warning(f'Pool only has {self.total_fees_token1:,.6e} of token1.')
+            amount_token1 = self.total_fees_token1
+
         # remove tokens from the pool
         self.total_fees_token0 -= amount_token0
         self.total_fees_token1 -= amount_token1
@@ -486,6 +486,9 @@ class Uniswapv3Pool:
         # reduce fees owed in the position
         position.tokens_owed0 -= amount_token0
         position.tokens_owed1 -= amount_token1
+
+        logger.debug(f'token0 removed from pool: {amount_token0:,.6e}')
+        logger.debug(f'token1 removed from pool: {amount_token1:,.6e}')
 
         return amount_token0, amount_token1
 
@@ -501,8 +504,8 @@ class Uniswapv3Pool:
             tick_lower = self.tick_map[position.tick_lower]
             tick_upper = self.tick_map[position.tick_upper]
 
-            liquidity_delta[tick_lower.sqrt_price ** 2] += position.liquidity
-            liquidity_delta[tick_upper.sqrt_price ** 2] -= position.liquidity
+            liquidity_delta[tick_lower.price] += position.liquidity
+            liquidity_delta[tick_upper.price] -= position.liquidity
 
         liquidity_delta = np.array(list(liquidity_delta.items()))
         liquidity_delta = liquidity_delta[liquidity_delta[:, 0].argsort()]
@@ -617,7 +620,7 @@ class Uniswapv3Pool:
 
     def __repr__(self):
         return (
-            f"Pool(price={self.price:,.6e}, "
-            f"liquidity={self.liquidity:,.6e}, "
+            f"Pool(price={self.price:,.4f}, "
+            f"liquidity={self.liquidity:,.2f}, "
             f"fee={self.fee:.2%})"
         )

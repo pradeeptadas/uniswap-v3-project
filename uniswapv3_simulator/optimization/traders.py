@@ -2,18 +2,25 @@
 #  Uniswap code
 import numpy as np
 from scipy import optimize
-# TODO: add documentation and logging throughout
+import logging
 
 
+logger = logging.getLogger('optimization.traders')
+
+
+# TODO: add documentation throughout
 class LiquidityTrader:
     def __init__(self, beta, p, seed=None):
         self._beta = beta
         self._p = p
         self.seed(seed=seed)
 
-    def get_swap(self, pool):
-        trade_sizes = self._rng.exponential(self._beta)
-        trade_signs = self._rng.choice([1, -1], p=[self._p, 1 - self._p])
+    def get_swap(self, pool, rng=None):
+        if rng is None:
+            rng = self._rng
+
+        trade_sizes = rng.exponential(self._beta)
+        trade_signs = rng.choice([1, -1], p=[self._p, 1 - self._p])
         trade = (trade_sizes * trade_signs)
 
         token = 1 if trade > 0 else 0
@@ -127,7 +134,10 @@ class Uniswapv3Arbitrageur(Arbitrageur):
                 constraints=constraint
             )
             # TODO: keep an eye on this as it may have to change (e.g., return 0)
-            assert res.success, 'Optimization failed.'
+            # assert res.success, 'Optimization failed.'
+            if not res.success:
+                logger.warning('Optimization failed. Returning None, None.')
+                return None, None
             if -res.fun < 0:
                 return None, None
 

@@ -95,7 +95,7 @@ class Position:
             f"Position(account_id={self.account_id}, "
             f"tick_lower={self.tick_lower:,.0f}, "
             f"tick_upper={self.tick_upper:,.0f}, "
-            f"liquidity={self.liquidity:,.6e})"
+            f"liquidity={self.liquidity:,.4f})"
         )
 
     # defining hash and equal so that we can use the Position class with
