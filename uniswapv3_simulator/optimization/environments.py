@@ -12,7 +12,7 @@ logger = logging.getLogger('optimization.environments')
 class OneStepEnvironment:
     def __init__(self, init_price, pool_fees, liquidity_fn,
                  mu, sigma, alpha, beta, q,
-                 tick_width=1,
+                 n_sims_per_step=50, tick_width=1,
                  max_price=None,  # TODO: need to think through this param
                  seed=None):
         self.init_price = init_price
@@ -27,6 +27,7 @@ class OneStepEnvironment:
         self.beta = beta
         self.q = q
 
+        self.n_sims_per_step = n_sims_per_step
         self.tick_width = tick_width
         self.max_price = max_price
         if self.max_price is None:
@@ -41,8 +42,6 @@ class OneStepEnvironment:
         self._rng = np.random.default_rng(seed)
 
     def reset(self):
-        self._pool = Uniswapv3Pool(self.pool_fees, 1, self.init_price)
-
         mu = self.mu.rvs()
         sigma = self.sigma.rvs()
         alpha = self.alpha.rvs()
@@ -50,12 +49,13 @@ class OneStepEnvironment:
         q = self.q.rvs()
 
         state = np.array([
-            self.init_price,
             mu,
             sigma,
             alpha,
             beta,
-            q
+            q,
+            self.init_price,
+            self.pool_fees,
         ])
         self._state = state
         logger.debug('Environment reset.')
@@ -65,47 +65,64 @@ class OneStepEnvironment:
 
     def step(self, action):
         logger.debug(f'Action: {action}')
-        set_positions(
-            self._pool,
-            lambda p: self.liquidity_fn(p, *action),
-            self.tick_width,
-            0,
-            self.max_price,
-        )
-        token0_in = self._pool.token0
-        token1_in = self._pool.token1
-        start_value = token1_in + token0_in * self.init_price
-        logger.debug(f'Initial value of position: {start_value:,.4f}')
+        mu = self._state[0]
+        sigma = self._state[1]
+        alpha = self._state[2]
+        beta = self._state[3]
+        q = self._state[4]
+        sim_total_fees, sim_adv_selection = [], []
 
-        mu = self._state[1]
-        sigma = self._state[2]
-        alpha = self._state[3]
-        beta = self._state[4]
-        q = self._state[5]
+        for i in range(self.n_sims_per_step):
+            self._pool = Uniswapv3Pool(self.pool_fees, 1, self.init_price)
 
-        info = self.simulate_trades(self._pool, mu, sigma, alpha, beta, q)
-        intrinsic_value = info['state']['ending_intrinsic_value']
+            set_positions(
+                self._pool,
+                lambda p: self.liquidity_fn(p, *action),
+                self.tick_width,
+                0,
+                self.max_price,
+            )
+            if len(self._pool.initd_ticks) == 0:
+                logger.warning('Pool has no liquidity. Ending simulation.')
+                return self._state, -99999.9, True, {}
+            token0_in = self._pool.token0
+            token1_in = self._pool.token1
+            start_value = token1_in + token0_in * self.init_price
+            logger.debug(f'Initial value of position: {start_value:,.4f}')
 
-        tokens = close_all_positions(self._pool)
-        token0_out = tokens[0]
-        token1_out = tokens[1]
-        end_value = token1_out + token0_out * intrinsic_value
-        logger.debug(f'Ending value of position: {end_value:,.4f}')
+            try:
+                info = self.simulate_trades(self._pool, mu, sigma, alpha, beta, q)
+            except AssertionError as e:
+                logger.warning(f'{e}. Ending simulation.')
+                return self._state, -99999.9, True, {}
+            intrinsic_value = info['state']['ending_intrinsic_value']
 
-        adv_selection = end_value - start_value
-        logger.debug(f'Adverse selection: {adv_selection:,.4f}')
+            tokens = close_all_positions(self._pool)
+            token0_out = tokens[0]
+            token1_out = tokens[1]
+            end_value = token1_out + token0_out * intrinsic_value
+            logger.debug(f'Ending value of position: {end_value:,.4f}')
 
-        token0_fees = tokens[2]
-        token1_fees = tokens[3]
-        total_fees = token1_fees + token0_fees * intrinsic_value
-        logger.debug(f'Total fees: {total_fees:,.4f}')
+            adv_selection = end_value - start_value
+            sim_adv_selection.append(adv_selection)
+            logger.debug(f'Adverse selection: {adv_selection:,.4f}')
 
-        reward = -((total_fees - adv_selection) ** 2)
+            token0_fees = tokens[2]
+            token1_fees = tokens[3]
+            total_fees = token1_fees + token0_fees * intrinsic_value
+            sim_total_fees.append(total_fees)
+            logger.debug(f'Total fees: {total_fees:,.4f}')
+
+        exp_total_fees = np.mean(sim_total_fees)
+        exp_adv_selection = np.mean(sim_adv_selection)
+        logger.debug(f'Expected total fees: {exp_total_fees:,.4f}')
+        logger.debug(f'Expected adverse selection: {exp_adv_selection:,.4f}')
+
+        reward = -((exp_total_fees - exp_adv_selection) ** 2)
         logger.debug(f'Reward: {reward:,.4f}')
-        state = None
         done = True
 
-        return state, reward, done, info
+        return self._state, reward, done, {}
 
     def simulate_trades(self, pool, mu, sigma, alpha, beta, q,
                         max_arb_tries=10, arb_fee_multiple=3):
