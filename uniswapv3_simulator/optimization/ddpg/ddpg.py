@@ -3,9 +3,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import copy
+import logging
 
 from .replay_buffer import ReplayBuffer
 from .exploration_noise import ConstantNoise
+
+
+logger = logging.getLogger('optimization.ddpg')
 
 
 class DDPG:
@@ -219,10 +223,13 @@ class DDPGTrainer:
         j = 0
         for i in range(self.args.train_steps):
             action = self.agent.action(obs.reshape(1, -1)).squeeze()
+            logger.debug(f'Raw action: {action}')
             exploration_noise = self._exploration_noise.sample()
+            logger.debug(f'Exploration noise: {exploration_noise}')
             action += exploration_noise
             if self.args.clip_actions:
                 action = np.clip(action, self.args.clip_actions[0], self.args.clip_actions[1])
+            logger.debug(f'Final action: {action}')
 
             next_obs, reward, terminal, _ = self.env.step(action)
             self._replay_buffer.add((obs, action, reward, next_obs, terminal))
