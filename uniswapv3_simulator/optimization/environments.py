@@ -88,6 +88,9 @@ class OneStepEnvironment:
         logger.debug(f'Expected total fees: {exp_total_fees:,.4f}')
         logger.debug(f'Expected adverse selection: {exp_adv_selection:,.4f}')
 
+        logger.debug(f'Std. dev. total fees: {np.std(total_fees):,.4f}')
+        logger.debug(f'Std. dev. adverse selection: {np.std(adv_selection):,.4f}')
+
         reward = -((exp_total_fees + exp_adv_selection) ** 2)
         logger.debug(f'Reward: {reward:,.4f}')
         done = True
@@ -144,15 +147,14 @@ def uniswapv3_simulation(state, init_price, fee, liquidity_fn, action,
 def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
                     max_arb_tries=10, arb_fee_multiple=3):
     rng = np.random.default_rng(seed)
-    results = {}
-    results['state'] = {
+    results = {'state': {
         'mu': mu,
         'sigma': sigma,
         'alpha': alpha,
         'beta': beta,
         'q': q,
         'start_price': pool.price,
-    }
+    }}
 
     intrinsic_value = pool.price
     min_price = pool.tick_map[pool.initd_ticks[0]].price
