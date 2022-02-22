@@ -91,7 +91,7 @@ class DDPG:
 
         action = self.online_network.action(obs)
         policy_loss = -self.online_network.critic_value(obs, action).mean()
-
+        print(critic_loss, policy_loss)
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
         if self.clip_gradients:
@@ -105,12 +105,8 @@ class DDPG:
 
 class LinearActorModel(nn.Module):
     def __init__(self, obs_size, action_size,
-                 critic_hidden_layers, action_scale=1.0):
+                 critic_hidden_layers):
         super().__init__()
-        if np.isscalar(action_scale):
-            self.action_scale = action_scale
-        else:
-            self.action_scale = torch.as_tensor(action_scale, dtype=torch.float32)
 
         critic_layers = []
         input_size = obs_size + action_size
@@ -122,16 +118,15 @@ class LinearActorModel(nn.Module):
 
         critic_layers.append(nn.Linear(input_size, 1))
         self.critic_layers = nn.Sequential(*critic_layers)
-        self.critic_params = self.critic_layers.parameters()
+        self.critic_params = list(self.critic_layers.parameters())
 
         self.actor_layers = nn.Linear(obs_size, action_size)
-        self.actor_params = self.actor_layers.parameters()
+        self.actor_params = list(self.actor_layers.parameters())
 
     def forward(self, obs):
         action = self.actor_layers(obs)
         # using sigmoid instead of tanh since "actions" are probably >= 0?
         action = torch.sigmoid(action).squeeze()
-        action = action * self.action_scale
 
         return action
 
@@ -146,17 +141,12 @@ class LinearActorModel(nn.Module):
 
 class DeepActorModel(nn.Module):
     def __init__(self, obs_size, action_size,
-                 actor_hidden_layers, critic_hidden_layers,
-                 action_scale=1.0):
+                 actor_hidden_layers, critic_hidden_layers):
         super().__init__()
-        if np.isscalar(action_scale):
-            self.action_scale = action_scale
-        else:
-            self.action_scale = torch.as_tensor(action_scale, dtype=torch.float32)
 
         critic_layers = []
         input_size = obs_size + action_size
-        critic_layers.append(nn.BatchNorm1d(input_size))
+        # critic_layers.append(nn.BatchNorm1d(input_size))
         for i, units in enumerate(critic_hidden_layers):
             output_size = units
             critic_layers.append(nn.Linear(input_size, output_size))
@@ -169,7 +159,7 @@ class DeepActorModel(nn.Module):
 
         actor_layers = []
         input_size = obs_size
-        actor_layers.append(nn.BatchNorm1d(input_size))
+        # actor_layers.append(nn.BatchNorm1d(input_size))
         for i, units in enumerate(actor_hidden_layers):
             output_size = units
             actor_layers.append(nn.Linear(input_size, output_size))
@@ -184,7 +174,6 @@ class DeepActorModel(nn.Module):
         action = self.actor_layers(obs)
         # using sigmoid instead of tanh since "actions" are probably >= 0?
         action = torch.sigmoid(action).squeeze()
-        action = action * self.action_scale
 
         return action
 
