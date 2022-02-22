@@ -38,8 +38,8 @@ class OneStepEnvironment:
 
         self.seed(seed=seed)
 
-        self._state = None
-        self._pool = None
+        self._obs = None
+        self._closed = True
 
     def seed(self, seed=None):
         self._rng = np.random.default_rng(seed)
@@ -51,7 +51,7 @@ class OneStepEnvironment:
         beta = self.beta.rvs()
         q = self.q.rvs()
 
-        state = np.array([
+        obs = np.array([
             mu,
             sigma,
             alpha,
@@ -60,16 +60,18 @@ class OneStepEnvironment:
             self.init_price,
             self.pool_fees,
         ])
-        self._state = state
+        self._obs = obs
+        self._closed = False
         logger.debug('Environment reset.')
-        logger.debug(f'Initial state: {state}')
+        logger.debug(f'Initial observation: {obs}')
 
-        return state
+        return obs
 
     def step(self, action):
+        assert not self._closed, 'Environment is closed.'
         logger.debug(f'Action: {action}')
         iterable = [
-            (self._state, self.init_price, self.pool_fees, self.liquidity_fn,
+            (self._obs, self.init_price, self.pool_fees, self.liquidity_fn,
              action, self.tick_width, self.max_price, logger)
             for _ in range(self.n_sims_per_step)
         ]
@@ -95,14 +97,18 @@ class OneStepEnvironment:
         logger.debug(f'Reward: {reward:,.4f}')
         done = True
 
-        return self._state, reward, done, {}
+        return self._obs, reward, done, {}
+
+    def close(self):
+        self._obs = None
+        self._closed = True
 
 
 def uniswapv3_simulation(state, init_price, fee, liquidity_fn, action,
                          tick_width, max_price, logger):
     # TODO: clean up logging here
     import logging
-    logging.getLogger('uniswap-v3').setLevel(logging.ERROR)
+    logging.basicConfig(level=logging.ERROR)
 
     mu, sigma, alpha, beta, q = state[:5]
 
@@ -122,7 +128,7 @@ def uniswapv3_simulation(state, init_price, fee, liquidity_fn, action,
     try:
         info = simulate_trades(pool, mu, sigma, alpha, beta, q, logger)
     except AssertionError as e:
-        logger.warning(f'{e}. Ending simulation.')
+        logger.warning(f'{e} Ending simulation.')
         # TODO: think about whether this is the best way to handle this
         return -99.9, -99.9
 
@@ -253,3 +259,66 @@ def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
     results['state']['ending_intrinsic_value'] = intrinsic_value
 
     return results
+
+
+class EnvWrapper:
+    def __init__(self, env):
+        self.env = env
+
+    def reset(self):
+        return self.env.reset()
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def close(self):
+        return self.env.close()
+
+    def seed(self, seed=None):
+        return self.env.seed(seed=seed)
+
+    @property
+    def unwrapped(self):
+        return self.env.unwrapped
+
+    def __getattr__(self, attr):
+        return getattr(self.env, attr)
+
+    def __repr__(self):
+        return '{}({})'.format(type(self).__name__, self.env.__str__())
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+class ScaleWrapper(EnvWrapper):
+    def __init__(self, env, obs_scale_fn, action_scale_fn, reward_scale_fn):
+        super().__init__(env)
+        self._obs_scale_fn = obs_scale_fn
+        self._action_scale_fn = action_scale_fn
+        self._reward_scale_fn = reward_scale_fn
+
+    def reset(self):
+        obs = super().reset()
+        scaled_obs = self._obs_scale_fn(obs)
+        logger.debug(f'Scaled observation: {scaled_obs}')
+
+        return scaled_obs
+
+    def step(self, action):
+        scaled_action = self._action_scale_fn(action)
+        logger.debug(f'Scaled action: {scaled_action}')
+
+        obs, reward, done, info = self.env.step(scaled_action)
+
+        scaled_obs = self._obs_scale_fn(obs)
+        logger.debug(f'Scaled observation: {scaled_obs}')
+
+        scaled_reward = self._reward_scale_fn(reward)
+        logger.debug(f'Scaled reward: {scaled_reward:,.4f}')
+
+        return scaled_obs, scaled_reward, done, info
+
