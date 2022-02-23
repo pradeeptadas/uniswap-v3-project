@@ -91,7 +91,7 @@ class DDPG:
 
         action = self.online_network.action(obs)
         policy_loss = -self.online_network.critic_value(obs, action).mean()
-        print(critic_loss, policy_loss)
+
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
         if self.clip_gradients:
@@ -210,45 +210,49 @@ class DDPGTrainer:
         obs = self.env.reset()
         total_reward = 0
         j = 0
-        for i in range(self.args.train_steps):
-            action = self.agent.action(obs.reshape(1, -1)).squeeze()
-            logger.debug(f'Raw action: {action}')
-            exploration_noise = self._exploration_noise.sample()
-            logger.debug(f'Exploration noise: {exploration_noise}')
-            action += exploration_noise
-            if self.args.clip_actions:
-                action = np.clip(action, self.args.clip_actions[0], self.args.clip_actions[1])
-            logger.debug(f'Final action: {action}')
+        try:
+            for i in range(self.args.train_steps):
+                action = self.agent.action(obs.reshape(1, -1)).squeeze()
+                logger.debug(f'Raw action: {action}')
+                exploration_noise = self._exploration_noise.sample()
+                logger.debug(f'Exploration noise: {exploration_noise}')
+                action += exploration_noise
+                if self.args.clip_actions:
+                    action = np.clip(action, self.args.clip_actions[0], self.args.clip_actions[1])
+                logger.debug(f'Final action: {action}')
 
-            next_obs, reward, terminal, _ = self.env.step(action)
-            self._replay_buffer.add((obs, action, reward, next_obs, terminal))
-            total_reward += reward
+                next_obs, reward, terminal, _ = self.env.step(action)
+                self._replay_buffer.add((obs, action, reward, next_obs, terminal))
+                total_reward += reward
 
-            if (i >= self.args.update_start) and (i % self.args.update_freq == 0):
-                exp_batch = self._replay_buffer.sample(self.args.batch_size)
-                exp_batch = list(zip(*exp_batch))
-                self.agent.update(
-                    np.array(exp_batch[0]),  # obs
-                    np.array(exp_batch[1]),  # action
-                    np.array(exp_batch[2]).reshape(-1, 1),  # reward
-                    np.array(exp_batch[3]),  # next_obs
-                    np.array(exp_batch[4]).reshape(-1, 1),  # terminal
-                )
-
-            obs = next_obs
-            j += 1
-            if terminal:
-                rewards.append(total_reward)
-                if len(rewards) % 50 == 0:
-                    ep_num = len(rewards)
-                    mean_score = np.mean(rewards[-50:])
-                    print(
-                        f'Episode: {ep_num:>5,} | Time Steps: {j:>5,} | '
-                        f'Mean Score: {mean_score:>7,.2f}'
+                if (i >= self.args.update_start) and (i % self.args.update_freq == 0):
+                    exp_batch = self._replay_buffer.sample(self.args.batch_size)
+                    exp_batch = list(zip(*exp_batch))
+                    self.agent.update(
+                        np.array(exp_batch[0]),  # obs
+                        np.array(exp_batch[1]),  # action
+                        np.array(exp_batch[2]).reshape(-1, 1),  # reward
+                        np.array(exp_batch[3]),  # next_obs
+                        np.array(exp_batch[4]).reshape(-1, 1),  # terminal
                     )
-                obs = self.env.reset()
-                total_reward = 0
-                j = 0
+
+                obs = next_obs
+                j += 1
+                if terminal:
+                    rewards.append(total_reward)
+                    if len(rewards) % 50 == 0:
+                        ep_num = len(rewards)
+                        mean_score = np.mean(rewards[-50:])
+                        print(
+                            f'Episode: {ep_num:>5,} | Time Steps: {j:>5,} | '
+                            f'Mean Score: {mean_score:>7,.2f}'
+                        )
+                    obs = self.env.reset()
+                    total_reward = 0
+                    j = 0
+
+        except KeyboardInterrupt:
+            logger.warning(f'Training stopped during step {i:,.0f}.')
 
         self.env.close()
 
@@ -272,6 +276,6 @@ class TrainArgs:
     def update(self, **kwargs):
         for key, value in kwargs.items():
             if not hasattr(self, key):
-                print(f'{key} is not a valid training parameter.')
+                logger.warning(f'{key} is not a valid training parameter.')
                 continue
             setattr(self, key, value)
