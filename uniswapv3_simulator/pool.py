@@ -499,10 +499,20 @@ class Uniswapv3Pool:
         :param p:
         :return:
         """
+        # adjust the price based on the multiplier
+        p = p / (self.token1_multiplier / self.token0_multiplier)
+
+        if len(self.initd_ticks) == 0:
+            raise ValueError('Pool has no liquidity.')
+
         liquidity_delta = defaultdict(lambda: 0)
         for k, position in self.position_map.items():
-            tick_lower = self.tick_map[position.tick_lower]
-            tick_upper = self.tick_map[position.tick_upper]
+            try:
+                tick_lower = self.tick_map[position.tick_lower]
+                tick_upper = self.tick_map[position.tick_upper]
+            except KeyError:
+                assert abs(position.liquidity) < 1e-12, 'Position liquidity != 0.'
+                continue
 
             liquidity_delta[tick_lower.price] += position.liquidity
             liquidity_delta[tick_upper.price] -= position.liquidity
@@ -513,25 +523,39 @@ class Uniswapv3Pool:
         liquidity_points = liquidity_delta
         liquidity_points[:, 1] = liquidity_delta[:, 1].cumsum()
         liquidity_points = np.insert(liquidity_points, 0, [-np.inf, 0], axis=0)
-        assert liquidity_points[-1, -1] == 0, 'Last value of liquidity != 0.'
+        assert abs(liquidity_points[-1, -1]) < 1e-6, 'Last value of liquidity != 0.'
+        liquidity_points[-1, -1] = 0.0
 
         return liquidity_points[liquidity_points[:, 0] < p, 1][-1]
 
-    def plot_liquidity_curve(self, ax=None):
+    def plot_liquidity_curve(self, interval=None, ax=None):
         """
         TODO: finish documenttion
 
+        :param interval:
         :param ax:
         :return:
         """
+        if len(self.initd_ticks) == 0:
+            raise ValueError('Pool has no liquidity.')
+
         if ax is None:
             fig, ax = plt.subplots(figsize=(20, 8))
 
         extra = 0.1
-        p_min = tick_to_sqrt_price(self.initd_ticks[0]) ** 2 * (1 - extra)
-        p_min = 0 if p_min < 10 else p_min
-        p_max = tick_to_sqrt_price(self.initd_ticks[-2]) ** 2 * (1 + extra)
         n_points = 1000
+
+        if interval is None:
+            p_min = tick_to_sqrt_price(self.initd_ticks[0]) ** 2 * (1 - extra)
+            p_min = 0 if p_min < 10 else p_min
+            p_max = tick_to_sqrt_price(self.initd_ticks[-1]) ** 2 * (1 + extra)
+
+            # adjust the price based on the multiplier
+            p_min = p_min * (self.token1_multiplier / self.token0_multiplier)
+            p_max = p_max * (self.token1_multiplier / self.token0_multiplier)
+        else:
+            p_min = interval[0] * (1 - extra)
+            p_max = interval[1] * (1 + extra)
 
         p = np.linspace(p_min, p_max, n_points)
         l = np.array([self.liquidity_curve(pi) for pi in p])
