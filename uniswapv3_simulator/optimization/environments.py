@@ -1,40 +1,34 @@
 import numpy as np
 import itertools
+from collections import defaultdict
 import multiprocessing as mp
 import logging
 
 from .traders import LiquidityTrader, Uniswapv3Arbitrageur
 from ..pool import Uniswapv3Pool
-from ..utils import set_positions, close_all_positions
+from ..math import *
+from ..utils import *
 
 
 logger = logging.getLogger('optimization.environments')
 
 
 class OneStepEnvironment:
-    def __init__(self, init_price, pool_fees, liquidity_fn,
-                 mu, sigma, alpha, beta, q,
-                 n_sims_per_step=50, tick_width=1, n_jobs=1,
-                 max_price=None,  # TODO: need to think through this param
-                 seed=None):
+    def __init__(self, init_price, liquidity_bins,
+                 fees, mu, sigma, alpha, beta,
+                 n_sims_per_step=50, n_jobs=1, seed=None):
         self.init_price = init_price
-        self.pool_fees = pool_fees
-
-        self.liquidity_fn = liquidity_fn
+        self.liquidity_bins = liquidity_bins
 
         # distributions to sample from for each variable
+        self.fees = fees
         self.mu = mu
         self.sigma = sigma
         self.alpha = alpha
         self.beta = beta
-        self.q = q
 
         self.n_sims_per_step = n_sims_per_step
         self.n_jobs = n_jobs
-        self.tick_width = tick_width
-        self.max_price = max_price
-        if self.max_price is None:
-            self.max_price = init_price * 3
 
         self.seed(seed=seed)
 
@@ -45,21 +39,13 @@ class OneStepEnvironment:
         self._rng = np.random.default_rng(seed)
 
     def reset(self):
+        fees = self.fees.rvs()
         mu = self.mu.rvs()
         sigma = self.sigma.rvs()
         alpha = self.alpha.rvs()
         beta = self.beta.rvs()
-        q = self.q.rvs()
+        obs = np.array([fees, mu, sigma, alpha, beta])
 
-        obs = np.array([
-            mu,
-            sigma,
-            alpha,
-            beta,
-            q,
-            self.init_price,
-            self.pool_fees,
-        ])
         self._obs = obs
         self._closed = False
         logger.debug('Environment reset.')
@@ -69,13 +55,12 @@ class OneStepEnvironment:
 
     def step(self, action):
         assert not self._closed, 'Environment is closed.'
-        logger.debug(f'Action: {action}')
         iterable = [
-            (self._obs, self.init_price, self.pool_fees, self.liquidity_fn,
-             action, self.tick_width, self.max_price, logger)
+            (self.init_price, self.liquidity_bins, self._obs, action, logger)
             for _ in range(self.n_sims_per_step)
         ]
 
+        # TODO: need to add random seeding here...
         if self.n_jobs == 1:
             sim_results = itertools.starmap(uniswapv3_simulation, iterable)
         elif self.n_jobs > 1:
@@ -84,16 +69,18 @@ class OneStepEnvironment:
         else:
             raise ValueError('n_jobs must be >=1.')
 
-        total_fees, adv_selection = zip(*sim_results)
-        exp_total_fees = np.mean(total_fees)
-        exp_adv_selection = np.mean(adv_selection)
-        logger.debug(f'Expected total fees: {exp_total_fees:,.4f}')
-        logger.debug(f'Expected adverse selection: {exp_adv_selection:,.4f}')
+        position_returns = defaultdict(list)
+        for ret_dict in sim_results:
+            for position_id, ret in ret_dict.items():
+                position_returns[position_id].append(ret)
 
-        logger.debug(f'Std. dev. total fees: {np.std(total_fees):,.4f}')
-        logger.debug(f'Std. dev. adverse selection: {np.std(adv_selection):,.4f}')
+        expected_returns = []
+        for position_id, returns in position_returns.items():
+            exp_ret = np.mean(returns)
+            expected_returns.append(exp_ret)
+            logger.debug(f'Expected return {position_id}: {exp_ret:,.2%}')
 
-        reward = -((exp_total_fees + exp_adv_selection) ** 2)
+        reward = -np.std(expected_returns)
         logger.debug(f'Reward: {reward:,.4f}')
         done = True
 
@@ -104,50 +91,67 @@ class OneStepEnvironment:
         self._closed = True
 
 
-def uniswapv3_simulation(state, init_price, fee, liquidity_fn, action,
-                         tick_width, max_price, logger):
+def uniswapv3_simulation(init_price, liquidity_bins, obs, action, logger):
     # TODO: clean up logging here
     import logging
     logging.basicConfig(level=logging.ERROR)
 
-    mu, sigma, alpha, beta, q = state[:5]
-
+    fee, mu, sigma, alpha, beta = obs
     pool = Uniswapv3Pool(fee, 1, init_price)
-    set_positions(pool, lambda p: liquidity_fn(p, *action), tick_width, 0, max_price)
 
-    if len(pool.initd_ticks) == 0:
-        logger.warning('Pool has no liquidity. Ending simulation.')
-        # TODO: think about whether this is the best way to handle this
-        return -99.9, -99.9
-
-    token0_in = pool.token0
-    token1_in = pool.token1
-    start_value = token1_in + token0_in * init_price
-    logger.debug(f'Initial value of position: {start_value:,.4f}')
+    assert len(liquidity_bins) - 1 == len(action), (
+        'Number of actions does not match the number of bins.'
+    )
+    init_values = {}
+    for i in range(len(action)):
+        account_id = f'position_{i + 1}'
+        tick_lower = sqrt_price_to_tick(liquidity_bins[i] ** 0.5)
+        tick_upper = sqrt_price_to_tick(liquidity_bins[i + 1] ** 0.5)
+        liquidity = action[i]
+        assert liquidity > 0, 'Liquidity must be greater than 0 for all bins.'
+        token0, token1 = pool.set_position(
+            account_id,
+            tick_lower,
+            tick_upper,
+            liquidity
+        )
+        value = calc_token_value(-token0, -token1, pool.price)
+        init_values[account_id] = value
+        logger.debug(f'Initial value of {account_id}: {value:,.4f}')
 
     try:
-        info = simulate_trades(pool, mu, sigma, alpha, beta, q, logger)
+        info = simulate_trades(pool, mu, sigma, alpha, beta, 0.5, logger)
     except AssertionError as e:
         logger.warning(f'{e} Ending simulation.')
         # TODO: think about whether this is the best way to handle this
-        return -99.9, -99.9
+        return 9
 
     intrinsic_value = info['state']['ending_intrinsic_value']
-    tokens = close_all_positions(pool)
-    token0_out = tokens[0]
-    token1_out = tokens[1]
-    end_value = token1_out + token0_out * intrinsic_value
-    logger.debug(f'Ending value of position: {end_value:,.4f}')
+    ending_values = {}
+    for position in pool.position_map.values():
+        token0, token1 = pool.set_position(
+            position.account_id,
+            position.tick_lower,
+            position.tick_upper,
+            -position.liquidity
+        )
+        fees_token0, fees_token1 = pool.collect_fees_earned(
+            position.account_id,
+            position.tick_lower,
+            position.tick_upper,
+        )
+        value = calc_token_value(token0 + fees_token0, token1 + fees_token1,
+                                 intrinsic_value)
+        ending_values[position.account_id] = value
+        logger.debug(f'Ending value of {position.account_id}: {value:,.4f}')
 
-    adv_selection = end_value - start_value
-    logger.debug(f'Adverse selection: {adv_selection:,.4f}')
+    returns = {}
+    for account_id in init_values.keys():
+        ret = ending_values[account_id] / init_values[account_id] - 1
+        returns[account_id] = ret
+        logger.debug(f'Return for {account_id}: {ret:,.2%}')
 
-    token0_fees = tokens[2]
-    token1_fees = tokens[3]
-    total_fees = token1_fees + token0_fees * intrinsic_value
-    logger.debug(f'Total fees: {total_fees:,.4f}')
-
-    return total_fees, adv_selection
+    return returns
 
 
 def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
@@ -194,7 +198,7 @@ def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
             logger.debug(f'Arbitrageur price target: {price_target:,.4f}')
 
             token, tokens_in = arbitrageur.get_swap(pool, price_target)
-            if tokens_in is None:
+            if (tokens_in is None) or (tokens_in < 1e-8):
                 logger.debug(f'No profitable arbitrage found.')
                 break
             logger.debug(f'Arbitrage swap: {tokens_in:,.4f} token{token}')
@@ -238,7 +242,7 @@ def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
         logger.debug(f'Arbitrageur price target: {price_target:,.4f}')
 
         token, tokens_in = arbitrageur.get_swap(pool, price_target)
-        if tokens_in is None:
+        if (tokens_in is None) or (tokens_in < 1e-8):
             logger.debug(f'No profitable arbitrage found.')
             break
         logger.debug(f'Arbitrage swap: {tokens_in:,.4f} token{token}')

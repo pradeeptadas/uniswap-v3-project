@@ -103,42 +103,6 @@ class DDPG:
         self.online_network.eval()
 
 
-class LinearActorModel(nn.Module):
-    def __init__(self, obs_size, action_size,
-                 critic_hidden_layers):
-        super().__init__()
-
-        critic_layers = []
-        input_size = obs_size + action_size
-        for i, units in enumerate(critic_hidden_layers):
-            output_size = units
-            critic_layers.append(nn.Linear(input_size, output_size))
-            critic_layers.append(nn.ReLU())
-            input_size = output_size
-
-        critic_layers.append(nn.Linear(input_size, 1))
-        self.critic_layers = nn.Sequential(*critic_layers)
-        self.critic_params = list(self.critic_layers.parameters())
-
-        self.actor_layers = nn.Linear(obs_size, action_size)
-        self.actor_params = list(self.actor_layers.parameters())
-
-    def forward(self, obs):
-        action = self.actor_layers(obs)
-        # using sigmoid instead of tanh since "actions" are probably >= 0?
-        action = torch.sigmoid(action).squeeze()
-
-        return action
-
-    def action(self, obs):
-        return self.forward(obs)
-
-    def critic_value(self, obs, action):
-        x = torch.cat([obs, action], dim=-1)
-
-        return self.critic_layers(x)
-
-
 class DeepActorModel(nn.Module):
     def __init__(self, obs_size, action_size,
                  actor_hidden_layers, critic_hidden_layers):
@@ -172,7 +136,7 @@ class DeepActorModel(nn.Module):
 
     def forward(self, obs):
         action = self.actor_layers(obs)
-        # using sigmoid instead of tanh since "actions" are probably >= 0?
+        # using sigmoid instead of tanh since "actions" >= 0?
         action = torch.sigmoid(action).squeeze()
 
         return action
@@ -244,8 +208,7 @@ class DDPGTrainer:
                         ep_num = len(rewards)
                         mean_score = np.mean(rewards[-50:])
                         print(
-                            f'Episode: {ep_num:>5,} | Time Steps: {j:>5,} | '
-                            f'Mean Score: {mean_score:>7,.2f}'
+                            f'Episode: {ep_num:>5,} | Mean Score: {mean_score:>7,.6f}'
                         )
                     obs = self.env.reset()
                     total_reward = 0
