@@ -5,6 +5,7 @@ import multiprocessing as mp
 import logging
 
 from .traders import LiquidityTrader, Uniswapv3Arbitrageur
+from .liquidity_fns import sech2_fn
 from ..pool import Uniswapv3Pool
 from ..math import *
 from ..utils import *
@@ -91,6 +92,78 @@ class OneStepEnvironment:
         self._closed = True
 
 
+class CompetitiveOneStepEnvironment:
+    def __init__(self, init_price, liquidity_bins,
+                 fees, mu, sigma, alpha, beta,
+                 curve_params=(100, 1000, 10000),
+                 n_sims_per_step=50, n_jobs=1, seed=None):
+        self.init_price = init_price
+        self.liquidity_bins = liquidity_bins
+
+        # distributions to sample from for each variable
+        self.fees = fees
+        self.mu = mu
+        self.sigma = sigma
+        self.alpha = alpha
+        self.beta = beta
+
+        self.curve_params = curve_params
+        self.n_sims_per_step = n_sims_per_step
+        self.n_jobs = n_jobs
+
+        self.seed(seed=seed)
+
+        self._obs = None
+        self._closed = True
+
+    def seed(self, seed=None):
+        self._rng = np.random.default_rng(seed)
+
+    def reset(self):
+        fees = self.fees.rvs()
+        mu = self.mu.rvs()
+        sigma = self.sigma.rvs()
+        alpha = self.alpha.rvs()
+        beta = self.beta.rvs()
+        obs = np.array([fees, mu, sigma, alpha, beta])
+
+        self._obs = obs
+        self._closed = False
+        logger.debug('Environment reset.')
+        logger.debug(f'Initial observation: {obs}')
+
+        return obs
+
+    def step(self, action):
+        assert not self._closed, 'Environment is closed.'
+        iterable = [
+            (self.init_price, self.liquidity_bins, self.curve_params,
+             self._obs, action, logger)
+            for _ in range(self.n_sims_per_step)
+        ]
+
+        # TODO: need to add random seeding here...
+        if self.n_jobs == 1:
+            sim_results = itertools.starmap(competitive_simulation, iterable)
+        elif self.n_jobs > 1:
+            with mp.Pool(self.n_jobs) as pool:
+                sim_results = pool.starmap(competitive_simulation, iterable)
+        else:
+            raise ValueError('n_jobs must be >=1.')
+
+        exp_ret = np.mean(sim_results)
+        sigma = np.std(sim_results)
+        reward = exp_ret / sigma
+        logger.debug(f'Reward (Sharpe ratio): {reward:,.2%}')
+        done = True
+
+        return self._obs, reward, done, {}
+
+    def close(self):
+        self._obs = None
+        self._closed = True
+
+
 def uniswapv3_simulation(init_price, liquidity_bins, obs, action, logger):
     # TODO: clean up logging here
     import logging
@@ -152,6 +225,71 @@ def uniswapv3_simulation(init_price, liquidity_bins, obs, action, logger):
         logger.debug(f'Return for {account_id}: {ret:,.2%}')
 
     return returns
+
+
+def competitive_simulation(init_price, liquidity_bins, curve_params,
+                           obs, action, logger):
+    # TODO: clean up logging here
+    import logging
+    logging.basicConfig(level=logging.ERROR)
+
+    fee, mu, sigma, alpha, beta = obs
+    pool = Uniswapv3Pool(fee, 1, init_price)
+
+    set_positions(pool, lambda p: sech2_fn(p, *curve_params), 1, 0, 1000,
+                  min_liquidity=1, position_id='LP1')
+
+    assert len(liquidity_bins) - 1 == len(action), (
+        'Number of actions does not match the number of bins.'
+    )
+    init_value = 0
+    account_id = 'LP2'
+    for i in range(len(action)):
+        tick_lower = sqrt_price_to_tick(liquidity_bins[i] ** 0.5)
+        tick_upper = sqrt_price_to_tick(liquidity_bins[i + 1] ** 0.5)
+        liquidity = action[i]
+        assert liquidity > 0, 'Liquidity must be greater than 0 for all bins.'
+        token0, token1 = pool.set_position(
+            account_id,
+            tick_lower,
+            tick_upper,
+            liquidity
+        )
+        value = calc_token_value(-token0, -token1, pool.price)
+        init_value += value
+    logger.debug(f'Initial value of {account_id}: {init_value:,.4f}')
+
+    try:
+        info = simulate_trades(pool, mu, sigma, alpha, beta, 0.5, logger)
+    except AssertionError as e:
+        logger.warning(f'{e} Ending simulation.')
+        # TODO: think about whether this is the best way to handle this
+        return 9
+
+    intrinsic_value = info['state']['ending_intrinsic_value']
+    ending_value = 0
+    for position in pool.position_map.values():
+        if position.account_id == account_id:
+            token0, token1 = pool.set_position(
+                position.account_id,
+                position.tick_lower,
+                position.tick_upper,
+                -position.liquidity
+            )
+            fees_token0, fees_token1 = pool.collect_fees_earned(
+                position.account_id,
+                position.tick_lower,
+                position.tick_upper,
+            )
+            value = calc_token_value(token0 + fees_token0, token1 + fees_token1,
+                                     intrinsic_value)
+            ending_value += value
+    logger.debug(f'Ending value of {account_id}: {ending_value:,.4f}')
+
+    total_return = ending_value / init_value - 1
+    logger.debug(f'Return for {account_id}: {total_return:,.2%}')
+
+    return total_return
 
 
 def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
