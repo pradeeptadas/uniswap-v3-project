@@ -9,7 +9,7 @@ logger = logging.getLogger('optimization.traders')
 
 
 # TODO: add documentation throughout
-class LiquidityTrader:
+class StochasticLiquidityTrader:
     def __init__(self, beta, p, seed=None):
         self._beta = beta
         self._p = p
@@ -20,6 +20,29 @@ class LiquidityTrader:
             rng = self._rng
 
         trade_sizes = rng.exponential(self._beta)
+        trade_signs = rng.choice([1, -1], p=[self._p, 1 - self._p])
+        trade = (trade_sizes * trade_signs)
+
+        token = 1 if trade > 0 else 0
+        tokens_in = trade if trade > 0 else abs(trade) / pool.price
+
+        return token, tokens_in
+
+    def seed(self, seed=None):
+        self._rng = np.random.default_rng(seed)
+
+
+class FixedLiquidityTrader:
+    def __init__(self, beta, p, seed=None):
+        self._beta = beta
+        self._p = p
+        self.seed(seed=seed)
+
+    def get_swap(self, pool, rng=None):
+        if rng is None:
+            rng = self._rng
+
+        trade_sizes = self._beta
         trade_signs = rng.choice([1, -1], p=[self._p, 1 - self._p])
         trade = (trade_sizes * trade_signs)
 
