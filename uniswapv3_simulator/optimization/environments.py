@@ -4,7 +4,11 @@ from collections import defaultdict
 import multiprocessing as mp
 import logging
 
-from .traders import LiquidityTrader, Uniswapv3Arbitrageur
+from .traders import (
+    StochasticLiquidityTrader,
+    FixedLiquidityTrader,
+    Uniswapv3Arbitrageur
+)
 from .liquidity_fns import sech2_fn
 from ..pool import Uniswapv3Pool
 from ..math import *
@@ -154,7 +158,9 @@ class CompetitiveOneStepEnvironment:
         exp_ret = np.mean(sim_results)
         sigma = np.std(sim_results)
         reward = exp_ret / sigma
-        logger.debug(f'Reward (Sharpe ratio): {reward:,.2%}')
+        logger.debug(f'Expected return: {exp_ret:,.2%}')
+        logger.debug(f'Volatility: {sigma:,.2%}')
+        logger.debug(f'Reward (Sharpe ratio): {reward:,.4f}')
         done = True
 
         return self._obs, reward, done, {}
@@ -193,7 +199,7 @@ def uniswapv3_simulation(init_price, liquidity_bins, obs, action, logger):
         logger.debug(f'Initial value of {account_id}: {value:,.4f}')
 
     try:
-        info = simulate_trades(pool, mu, sigma, alpha, beta, 0.5, logger)
+        info = simulate_trades_v2(pool, mu, sigma, alpha, beta, 0.5, logger)
     except AssertionError as e:
         logger.warning(f'{e} Ending simulation.')
         # TODO: think about whether this is the best way to handle this
@@ -236,7 +242,7 @@ def competitive_simulation(init_price, liquidity_bins, curve_params,
     fee, mu, sigma, alpha, beta = obs
     pool = Uniswapv3Pool(fee, 1, init_price)
 
-    set_positions(pool, lambda p: sech2_fn(p, *curve_params), 1, 0, 1000,
+    set_positions(pool, lambda p: sech2_fn(p, *curve_params), 5, 0, 200,
                   min_liquidity=1, position_id='LP1')
 
     assert len(liquidity_bins) - 1 == len(action), (
@@ -307,7 +313,7 @@ def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
     intrinsic_value = pool.price
     min_price = pool.tick_map[pool.initd_ticks[0]].price
     max_price = pool.tick_map[pool.initd_ticks[-1]].price
-    liquidity_trader = LiquidityTrader(beta, q)
+    liquidity_trader = StochasticLiquidityTrader(beta, q)
     arbitrageur = Uniswapv3Arbitrageur()
     trades = []
 
@@ -368,7 +374,118 @@ def simulate_trades(pool, mu, sigma, alpha, beta, q, logger, seed=None,
             f'min pool price, {min_price:,.4f}.'
         )
         intrinsic_value = min_price
-        logger.debug(f'New intrinsic value: {intrinsic_value:,.4f}')
+    logger.debug(f'New intrinsic value: {intrinsic_value:,.4f}')
+
+    # TODO: this is the same as above - maybe make it a function?
+    for i in range(max_arb_tries):
+        pct_delta = intrinsic_value / pool.price - 1
+        if abs(pct_delta) < arb_fee_multiple * pool.fee:
+            price_target = intrinsic_value
+        else:
+            price_target = pool.price * (1 + (pct_delta / 2))
+        logger.debug(f'Arbitrageur price target: {price_target:,.4f}')
+
+        token, tokens_in = arbitrageur.get_swap(pool, price_target)
+        if (tokens_in is None) or (tokens_in < 1e-8):
+            logger.debug(f'No profitable arbitrage found.')
+            break
+        logger.debug(f'Arbitrage swap: {tokens_in:,.4f} token{token}')
+
+        dx, dy = pool.swap(token, tokens_in)
+        profit = arbitrageur.calc_profit(-dx, -dy, intrinsic_value)
+        trades.append({
+            'trade_type': 'arbitrage',
+            'pool_price': pool.price,
+            'dx': dx,
+            'dy': dy,
+            'profit': profit
+        })
+        logger.debug(f'Pool price after arbitrage swap: {pool.price:,.4f}')
+
+    results['trades'] = trades
+    results['state']['ending_pool_price'] = pool.price
+    results['state']['ending_intrinsic_value'] = intrinsic_value
+
+    return results
+
+
+def simulate_trades_v2(pool, mu, sigma, alpha, beta, q, logger, seed=None,
+                       max_arb_tries=10, arb_fee_multiple=3):
+    rng = np.random.default_rng(seed)
+    results = {'state': {
+        'mu': mu,
+        'sigma': sigma,
+        'alpha': alpha,
+        'beta': beta,
+        'q': q,
+        'start_price': pool.price,
+    }}
+
+    intrinsic_value = pool.price
+    min_price = pool.tick_map[pool.initd_ticks[0]].price
+    max_price = pool.tick_map[pool.initd_ticks[-1]].price
+    liquidity_trader = FixedLiquidityTrader(beta, q)
+    arbitrageur = Uniswapv3Arbitrageur()
+    trades = []
+
+    n_liquidity_trades = int(alpha)
+    logger.debug(f'Total liquidity trades: {n_liquidity_trades:,.0f}')
+    for _ in range(n_liquidity_trades):
+        token, tokens_in = liquidity_trader.get_swap(pool, rng=rng)
+        logger.debug(f'Liquidity swap: {tokens_in:,.4f} token{token}')
+        dx, dy = pool.swap(token, tokens_in)
+
+        trades.append({
+            'trade_type': 'liquidity_trade',
+            'pool_price': pool.price,
+            'dx': dx,
+            'dy': dy,
+            'profit': np.nan
+        })
+        logger.debug(f'Pool price after liquidity swap: {pool.price:,.4f}')
+
+        for i in range(max_arb_tries):
+            pct_delta = intrinsic_value / pool.price - 1
+            if abs(pct_delta) < arb_fee_multiple * pool.fee:
+                price_target = intrinsic_value
+            else:
+                price_target = pool.price * (1 + (pct_delta / 2))
+            logger.debug(f'Arbitrageur price target: {price_target:,.4f}')
+
+            token, tokens_in = arbitrageur.get_swap(pool, price_target)
+            if (tokens_in is None) or (tokens_in < 1e-8):
+                logger.debug(f'No profitable arbitrage found.')
+                break
+            logger.debug(f'Arbitrage swap: {tokens_in:,.4f} token{token}')
+
+            dx, dy = pool.swap(token, tokens_in)
+            profit = arbitrageur.calc_profit(-dx, -dy, intrinsic_value)
+            trades.append({
+                'trade_type': 'arbitrage',
+                'pool_price': pool.price,
+                'dx': dx,
+                'dy': dy,
+                'profit': profit
+            })
+            logger.debug(f'Pool price after arbitrage swap: {pool.price:,.4f}')
+
+    dt = 1
+    z = rng.normal(0, 1)
+    x = (mu - sigma ** 2 / 2) * dt + sigma * np.sqrt(dt) * z
+    intrinsic_value = intrinsic_value * np.exp(x)
+    if intrinsic_value > max_price:
+        logger.warning(
+            f'Intrinsic value, {intrinsic_value:,.4f}, is greater than the '
+            f'max pool price, {max_price:,.4f}.'
+        )
+        intrinsic_value = max_price
+    elif intrinsic_value < min_price:
+        logger.warning(
+            f'Intrinsic value, {intrinsic_value:,.4f}, is less than the '
+            f'min pool price, {min_price:,.4f}.'
+        )
+        intrinsic_value = min_price
+    logger.debug(f'New intrinsic value: {intrinsic_value:,.4f}')
 
     # TODO: this is the same as above - maybe make it a function?
     for i in range(max_arb_tries):

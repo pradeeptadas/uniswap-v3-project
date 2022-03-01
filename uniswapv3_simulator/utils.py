@@ -101,38 +101,53 @@ def solve_for_liquidity_delta(token0, token1, tick_lower, tick_upper,
     return liquidity_delta
 
 
-def set_positions(pool, liquidity_fn, tick_size, min_price, max_price,
-                  min_liquidity=1, position_id='position_id'):
+def set_positions(pool, liquidity_fn, position_width, min_price, max_price,
+                  min_liquidity=1, position_id='pos_id', separate_pos=False):
     """
     TODO: finish documentation
 
     :param pool:
     :param liquidity_fn:
-    :param tick_size:
+    :param position_width:
     :param min_price:
     :param max_price:
     :param min_liquidity:
     :param position_id:
+    :param separate_pos:
     :return:
     """
+    tokens = {}
     lower_bounds = np.linspace(
         min_price,
         max_price,
-        int((max_price - min_price) / tick_size) + 1
+        int((max_price - min_price) / position_width) + 1
     )
-    for price_lower in lower_bounds:
+    for i, price_lower in enumerate(lower_bounds[:-1]):
         if price_lower == 0:
             tick_lower = sqrt_price_to_tick((price_lower + 1e-8) ** 0.5)
         else:
             tick_lower = sqrt_price_to_tick(price_lower ** 0.5)
 
-        tick_upper = sqrt_price_to_tick((price_lower + tick_size) ** 0.5)
+        tick_upper = sqrt_price_to_tick((price_lower + position_width) ** 0.5)
         tick_mid = int((tick_lower + tick_upper) / 2)
         price_mid = tick_to_sqrt_price(tick_mid) ** 2
         liquidity = liquidity_fn(price_mid)
 
         if liquidity >= min_liquidity:
-            pool.set_position(position_id, tick_lower, tick_upper, liquidity)
+            pid = position_id + str(i + 1) if separate_pos else position_id
+            token0, token1 = pool.set_position(
+                pid,
+                tick_lower,
+                tick_upper,
+                liquidity
+            )
+            if pid in tokens:
+                tokens[pid]['token0'] += token0
+                tokens[pid]['token1'] += token1
+            else:
+                tokens[pid] = {'token0': token0, 'token1': token1}
+
+    return tokens
 
 
 def close_all_positions(pool, account_id=None):
