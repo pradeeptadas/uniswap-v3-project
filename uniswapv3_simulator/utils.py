@@ -594,7 +594,11 @@ def calc_all_returns_per_bin(pool_snapshots, all_txn, liquidity, swaps,
     # will not have a full period
     for i, period_start in enumerate(date_range[:-1]):
         period_end = date_range[i + 1]
-        start_pool = pool_snapshots[period_start.strftime('%Y-%m-%d %H:%M:%S')]
+        pool_key = period_start.strftime('%Y-%m-%d %H:%M:%S')
+        if pool_key not in pool_snapshots:
+            logger.warning(f'{pool_key} not included in the pool snapshots.')
+            continue
+        start_pool = pool_snapshots[pool_key]
         price_bins = np.array(
             [0]
             + [start_pool.price * (1 + i * sigma) for i in range(-10, 11)]
