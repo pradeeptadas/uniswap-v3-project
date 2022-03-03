@@ -10,7 +10,6 @@ from .pool import Uniswapv3Pool
 from uniswapv3_simulator.tick import MIN_TICK, MAX_TICK
 from .math import *
 
-
 logger = logging.getLogger('uniswap-v3.utils')
 
 
@@ -18,7 +17,6 @@ def pool_init_price(token0, token1, tick_upper, tick_lower, liquidity_delta,
                     token0_decimals, token1_decimals):
     """
     TODO: finish documentation
-
     :param token0:
     :param token1:
     :param tick_upper:
@@ -59,7 +57,6 @@ def solve_for_liquidity_delta(token0, token1, tick_lower, tick_upper,
                               check_res=False):
     """
     TODO: finish documentation
-
     :param token0:
     :param token1:
     :param tick_lower:
@@ -105,7 +102,6 @@ def set_positions(pool, liquidity_fn, position_width, min_price, max_price,
                   min_liquidity=1, position_id='pos_id', separate_pos=False):
     """
     TODO: finish documentation
-
     :param pool:
     :param liquidity_fn:
     :param position_width:
@@ -153,7 +149,6 @@ def set_positions(pool, liquidity_fn, position_width, min_price, max_price,
 def close_all_positions(pool, account_id=None):
     """
     TODO: finish documentation
-
     :param pool:
     :param account_id:
     :return:
@@ -222,7 +217,6 @@ def run_historical_pool(init_price, all_txn, liquidity, swaps,
                         token0_tols={'atol': 1e-12, 'rtol': 1e-8},
                         token1_tols={'atol': 1e-12, 'rtol': 1e-8},
                         liquidity_tols={'atol': 1e-8, 'rtol': 1e-5}):
-
     fee = liquidity.at[0, 'pool_fee'] / 1e+6
     tick_spacing = liquidity.at[0, 'pool_tick_spacing']
     token0_decimals = liquidity.at[0, 'contract_decimals_token_0']
