@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from scipy import optimize
+import re
 import copy
 from datetime import timedelta
 from collections import defaultdict
@@ -213,7 +214,8 @@ def organize_txns(liquidity, swaps, max_date=None):
 
 
 def run_historical_pool(init_price, all_txn, liquidity, swaps,
-                        position_id='generic_LP', checks_on=False, verbose=True,
+                        save_freq='D', position_id='generic_LP',
+                        checks_on=False, verbose=True,
                         token0_tols={'atol': 1e-12, 'rtol': 1e-8},
                         token1_tols={'atol': 1e-12, 'rtol': 1e-8},
                         liquidity_tols={'atol': 1e-8, 'rtol': 1e-5}):
@@ -232,7 +234,7 @@ def run_historical_pool(init_price, all_txn, liquidity, swaps,
     pool_snapshots = {}
     for i, row in all_txn.iterrows():
         logger.debug(f'Transaction {i}.')
-        current_date = row['txn_time'].date()
+        current_time = row['txn_time'].floor(save_freq)
         txn = row['event']
         idx = row['orig_idx']
 
@@ -319,8 +321,9 @@ def run_historical_pool(init_price, all_txn, liquidity, swaps,
         if i + 1 < all_txn.shape[0]:
             # if the next date is different than the current date, save the
             # pool so we have the starting liquidity curve for the next day
-            if all_txn.at[i + 1, 'txn_time'].date() > current_date:
-                date_key = (current_date + timedelta(1)).strftime('%Y-%m-%d')
+            next_time = all_txn.at[i + 1, 'txn_time'].floor(save_freq)
+            if next_time > current_time:
+                date_key = next_time.strftime('%Y-%m-%d %H:%M:%S')
                 pool_snapshots[date_key] = copy.deepcopy(pool)
 
         tx_results.append({
@@ -443,7 +446,8 @@ def calc_token_value(token0, token1, price, numeraire_token=1):
 
 
 def calc_irr_per_bin(start_pool, price_bins, all_txn, liquidity, swaps,
-                     numeraire_token=1, position_id='generic_LP'):
+                     period_start, period_end, numeraire_token=1,
+                     position_id='generic_LP'):
     token0_decimals = liquidity.at[0, 'contract_decimals_token_0']
     token1_decimals = liquidity.at[0, 'contract_decimals_token_1']
     multiplier = start_pool.token1_multiplier / start_pool.token0_multiplier
@@ -476,7 +480,7 @@ def calc_irr_per_bin(start_pool, price_bins, all_txn, liquidity, swaps,
         logging.info(f'Transaction {i}.')
         txn = row['event']
         idx = row['orig_idx']
-        time = row['txn_time']
+        txn_time = row['txn_time']
 
         if 'LIQUIDITY' in txn:
             token0 = liquidity.at[idx, 'token_0_amount']
@@ -531,8 +535,12 @@ def calc_irr_per_bin(start_pool, price_bins, all_txn, liquidity, swaps,
                 cf = calc_token_value(token0, token1, pool.price,
                                       numeraire_token=numeraire_token)
                 cash_flows[new_position[0]].append(cf)
-                # TODO: need to update this to handle different time horizons
-                times[new_position[0]].append(get_hours(time) / 24)
+                time_since_start = (
+                    (txn_time - period_start) /
+                    (period_end - period_start)
+                )
+                assert time_since_start <= 1.0, 'Time since start cannot be >1.0.'
+                times[new_position[0]].append(time_since_start)
 
         elif txn == 'SWAP':
             token0 = swaps.at[idx, 'token_0_amount']
@@ -566,3 +574,66 @@ def calc_irr_per_bin(start_pool, price_bins, all_txn, liquidity, swaps,
         irrs[account_id] = irr
 
     return irrs
+
+
+def calc_all_returns_per_bin(pool_snapshots, all_txn, liquidity, swaps,
+                             freq='D', sigma=0.04, numeraire_token=1):
+    all_returns = {}
+    date_range = pd.date_range(
+        min(pool_snapshots.keys()),
+        max(pool_snapshots.keys()),
+        freq=freq
+    )
+    # make sure the timestamps have no timezone so we can perform various
+    # operations on the timestamps
+    all_txn['txn_time'] = all_txn['txn_time'].dt.tz_localize(None)
+    liquidity['txn_time'] = liquidity['txn_time'].dt.tz_localize(None)
+    swaps['swap_time'] = swaps['swap_time'].dt.tz_localize(None)
+
+    # only iterate through first len(date_range) - 1 items as the last item
+    # will not have a full period
+    for i, period_start in enumerate(date_range[:-1]):
+        period_end = date_range[i + 1]
+        start_pool = pool_snapshots[period_start.strftime('%Y-%m-%d %H:%M:%S')]
+        price_bins = np.array(
+            [0]
+            + [start_pool.price * (1 + i * sigma) for i in range(-10, 11)]
+            + [np.inf]
+        )
+        period_idx = (
+            (all_txn['txn_time'] >= period_start) &
+            (all_txn['txn_time'] < period_end)
+        )
+        txns = all_txn.loc[period_idx]
+        # There are a few days for the DAI-WETH-500 pool where the swaps move
+        # to an area of slightly less than 0 liquidity (due to rounding errors),
+        # so we wrap this in a try/except. For simplicity, we just skip
+        # these days.
+        try:
+            irrs = calc_irr_per_bin(
+                start_pool,
+                price_bins,
+                txns,
+                liquidity,
+                swaps,
+                period_start,
+                period_end,
+                numeraire_token=numeraire_token,
+                position_id='generic_LP'
+            )
+            # There are a few days with extremely large IRRs, which appear
+            # to be due to LPs creating artificial limit orders. For simplicity,
+            # we just skip these days as well.
+            add_to_returns = True
+            for irr in irrs.values():
+                if irr > 1:
+                    logger.warning(f'{period_start}: Abnormal IRR {irr:,.2%}.')
+                    add_to_returns = False
+                    break
+            if add_to_returns:
+                all_returns[period_start] = irrs
+
+        except AssertionError as e:
+            logger.warning(f'{period_start}: {e}')
+
+    return all_returns

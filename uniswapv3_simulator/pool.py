@@ -472,11 +472,17 @@ class Uniswapv3Pool:
 
         # limit tokens removed to amounts in pool fees
         if amount_token0 > self.total_fees_token0:
-            logger.warning(f'Pool only has {self.total_fees_token0:,.6e} of token0.')
+            logger.warning(
+                f'Pool only has {self.total_fees_token0:,.6e} of token0. '
+                f'Cannot withdraw the entire {amount_token0:,.6e}.'
+            )
             amount_token0 = self.total_fees_token0
 
         if amount_token1 > self.total_fees_token1:
-            logger.warning(f'Pool only has {self.total_fees_token1:,.6e} of token1.')
+            logger.warning(
+                f'Pool only has {self.total_fees_token1:,.6e} of token1. '
+                f'Cannot withdraw the entire {amount_token1:,.6e}.'
+            )
             amount_token1 = self.total_fees_token1
 
         # remove tokens from the pool
