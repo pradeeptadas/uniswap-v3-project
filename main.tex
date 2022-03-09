@@ -1,0 +1,977 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage[english]{babel}
+\usepackage[title,titletoc]{appendix}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\usepackage{indentfirst}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{tikz,pgfplots,pgfplotstable}
+\usepackage{xcolor}
+\usepackage{secdot}
+\usepackage{titlesec}
+\usepackage{dcolumn}
+\usepackage[font=scriptsize,labelfont=bf,skip=5pt]{caption}
+\usepackage{amsmath}
+\usepackage{setspace}
+\usepackage[round]{natbib}
+
+\usepackage{hyperref}
+
+\usepackage[titles]{tocloft}
+\setlength{\cftbeforechapskip}
+
+\bibliographystyle{plainnat}
+\renewcommand*{\bibfont}{\raggedright}
+\DeclareGraphicsExtensions{.png,.pdf}
+\setlength{\parskip}{0.75em}
+\titlespacing\section{0pt}{12pt plus 4pt minus 2pt}{0pt plus 2pt minus 2pt}
+% not currently using these since we don't have complex tables
+\newcolumntype{d}[1]{D..{#1}} % for alignment of numbers on decimal marker
+\newcommand\mc[1]{\multicolumn{1}{c}{#1}}
+\DeclareMathOperator{\sech}{sech}
+
+\title{\textbf{Liquidity Provisioning in Uniswap V3}}
+
+\author{
+Sheldon Benard \\
+\texttt{sheldon.benard@berkeley.edu} \and
+Pradeepta Das \\
+\texttt{pradeepta@berkeley.edu} \and
+Srajan Garg \\
+\texttt{srajangarg@berkeley.edu} \and
+Sarthak Sagar \\
+\texttt{sarthak\_sagar@berkeley.edu} \and
+Philip Spalding \\
+\texttt{pspalding@berkeley.edu}
+}
+
+\date{
+\vspace{2cm}Team 04 \\
+Advisor: Dr. Christine Parlour\\
+\vspace{2cm}March, 2022
+}
+
+\usepackage{glossaries}
+\makeglossaries
+
+\newglossaryentry{blockchain}{
+    name={Blockchain},
+    text={blockchain},
+    description={A distributed database that is shared among the nodes of a computer network.}
+}
+
+\newglossaryentry{wbtc}{
+    name={WBTC},
+    description={Wrapped Bitcoin. BTC = Bitcoin token.}
+}
+
+\newglossaryentry{eth}{
+    name={ETH},
+    description={Ether cryptocurrency. It is the token for the Ethereum blockchain.}
+}
+
+
+\newglossaryentry{smartcontract}{
+    name={Smart contract},
+    text={smart contract},
+    description={Programs that reside and run on a blockchain. Ethereum blockchain originally introduced smart contracts in 2013. Smart contracts are ``not controlled by a user, instead they are deployed to the network and run as programmed. User accounts can then interact with a smart contract by submitting transactions that execute a function defined on the smart contract. Smart contracts can define rules, like a regular contract, and automatically enforce them via the code. Smart contracts cannot be deleted by default, and interactions with them are irreversible" \citep*{EthereumSmartContracts}. These programmatic contracts have an application in areas which require trusted transactions between parties without the need for a central authority.}
+}
+\newglossaryentry{concen_liq} {
+    name={Concentrated liquidity},
+    text={concentrated liquidity},
+    description={This was introduced in uniswap v3 where LPs can provide liquidity in a price range of their choice unlike uniswap v2. Because of this, ticks were introduced and transaction fees are no longer added to the pool's reserves but set aside in a separate account.}
+}
+\newglossaryentry{weth} {
+    name={WETH},
+    description={Wrapped Ether. It is different from ETH (Ether). WETH follows the ERC-20 standard, while ETH does not. WETH was created because ETH was not feasible to be used for various DeFi applications. Thus, wrapping the ETH token enables it to be used across a wide spectrum of dApps.}
+}
+\newglossaryentry{token} {
+    name={Token},
+    text={token},
+    description={Refers to how cryptocurrencies are denominated. These tokens represent fungible and tradable assets or utilities that reside on their own blockchains. They are often used to fundraise for crowd sales but not limited to. In context of this report, a token always refers to an ERC20 token. ERC20 is a standard used for creating and issuing smart contracts on the Ethereum blockchain. ERC stands for "Ethereum request for comment," and the ERC20 standard was implemented in 2015.}
+}
+\newglossaryentry{pool} {
+    name={Pool},
+    text={pool},
+    description={Uniswap has several smart contracts that enables users to trade one token (e.g. WETH) for another (e.g. USDC). Because the reserves provided by LPs are pooled together in a smart contract, we commonly refer to these contracts as pools.}
+}
+\newglossaryentry{prinnv} {
+    name={Price innovation},
+    text={price innovation},
+    description={Refers to the price movement in the underlying asset (here on a token). Once the price innovation occurs, arbitrgeurs, in a DEX, trade until there is no more profit. This brings the pool's price close to the market price.}
+}
+\newglossaryentry{flashswap} {
+    name={Flash swap},
+    text={flash swap},
+    description={This allows users to effectively borrow assets from the pool and execute arbitrary logic as long as the assets are either returned along with a small fee or are paid for like a normal swap by the end of the transaction \citep{Uniswapv2}. Whereas in traditional markets arbitrageurs must have sufficient capital to take advantage of arbitrage opportunities, flash swaps effectively allow anyone to perform capital free arbitrage.}
+}
+\newglossaryentry{gas} {
+    name={Gas fee},
+    text={gas fee},
+    description={every transaction between a user and the pool, including both swapping and adding/removing liquidity, incurs a transaction cost, or gas fee. Gas fees on the Ethereum blockchain are quoted in units of gwei, where 1 gwei is $10^{−9}$ ETH. Each transaction requires a a known number of individual, low-level computational steps, each of which requires a known amount of gas, which is independent of market conditions.}
+}
+\newglossaryentry{dappes} {
+    name={dApp},
+    description={}
+}
+\newglossaryentry{dapp}{
+    type=\acronymtype, name={dApp}, description={Decentralized Application. These applications leverage the decentralized infrastructure. Ethereum blockchain (or any other Turing-complete blockchain) are used to develop such applications. They are robust, as they don't require centralized servers; transparent, since the code and data is stored on the public blockchain; and censorship resistant.}, first={Decentralized Applications (dApps)}, see=[Glossary:]{dappes}
+}
+\newglossaryentry{il} {
+    name={Impermanent Loss},
+    text={impermanent loss},
+    description={}
+}
+\newglossaryentry{defi_e} {name={DeFi}, description={}}
+\newglossaryentry{defi}{type=\acronymtype, name={DeFi}, description={Decentralized Finance. An emerging financial technology based on secure distributed ledgers similar to those used by cryptocurrencies.}, first={Decentralized Finance (DeFi)}, see=[Glossary:]{defi_e}}
+
+\newglossaryentry{cex_e} {name={CEX}, description={}}
+\newglossaryentry{cex}{type=\acronymtype, name={CEX}, description={Centralized Exchange. Basically a traditional exchange which is operated centrally.}, first={Centralized Exchange (CEX)}, see=[Glossary:]{cex_e}}
+
+\newglossaryentry{dex_e} {name={DEX}, description={}}
+\newglossaryentry{dex}{type=\acronymtype, name={DEX}, description={Decentralized Exchange. These exchanges are one example of dApp that allow for secure, direct peer-to-peer cryptocurrency transactions without the need for an intermediary.}, first={Decentralized Exchanges (DEXs)}, see=[Glossary:]{dex_e}}
+
+\newglossaryentry{amm_e} {name={AMM}, description={}}
+\newglossaryentry{amm}{type=\acronymtype, name={AMM}, description={Automated Market Maker. It is a computer program that automates the process of providing liquidity.}, first={Automated Market Maker (AMM)}, see=[Glossary:]{amm_e}}
+
+\newglossaryentry{lp_e} {name={LP}, description={}}
+\newglossaryentry{lp}{type=\acronymtype, name={LP}, description={Liquidity Provider. Refers to individuals or organizations providing liquidity in a pool thereby function as a market maker.}, first={Liquidity Providers (LPs)}, see=[Glossary:]{lp_e}}
+
+\newglossaryentry{cfmm_e} {name={CFMM}, description={}}
+\newglossaryentry{cfmm}{type=\acronymtype, name={CFMM}, description={Constant Function Market Maker. Like CLOBs in CEXs, DEXs use CFMMs to accept or reject a trade evaluating a function that depends on the current reserves of the pool and the proposed trade.}, first={Constant Function Market Maker (CFMM)}, see=[Glossary:]{cfmm_e}}
+
+\newglossaryentry{cpmm_e} {name={CPMM}, description={}}
+\newglossaryentry{cpmm}{type=\acronymtype, name={CPMM}, description={Constant Product Market Maker. Type of CFMM which requires that any trade must change the reserves, denoted $x, y$, such that $xy = k$. In other words, the product of the reserves must remain unchanged after each trade.}, first={Constant Product Market Maker (CPMM)}, see=[Glossary:]{cpmm_e}}
+
+\newglossaryentry{clob_e} {name={CLOB}, description={}}
+\newglossaryentry{clob}{type=\acronymtype, name={CLOB}, description={Central Limit Order Book. Used in traditional exchanges to match and execute trades.}, first={Central Limit Order Book (CLOB)}, see=[Glossary:]{clob_e}}
+
+\newglossaryentry{tvl_e} {name={TVL}, description={}}
+\newglossaryentry{tvl}{type=\acronymtype, name={TVL}, description={Total Value Locked. It is the total value of assets deposited in a DeFi protocol. It is considered one of the key metric for gauging interest in that particular protocol in decentralized world.}, first={Total Value Locked (TVL)}, see=[Glossary:]{tvl_e}}
+
+\begin{document}
+
+\maketitle
+
+\vspace{1cm}
+\begin{abstract}
+\noindent Uniswap v3 allows liquidity providers to concentate their capital with a range, effectively leveraging their investment and increasing the capital efficiency of the Uniswap markets. This feature allows liquidity providers to execute a variety of provisioning strategies, but also introduces competition between liquidity providers. We explore the dynamics of liquidity provider returns in Uniswap v3 markets, and evaluate empirically whether the largest markets are in equilibrium. We observe that, currently, these pools may have too much liquidity to support the fee revenue generated given the risk of adverse selection that liquidity providers are exposed to, making it difficult for liquidity providers to earn positive risk adjusted returns.
+\end{abstract}
+\thispagestyle{empty}
+
+\clearpage
+\hspace{0pt}
+\vfill
+\begin{center}
+    \textbf{Acknowledgements}
+\end{center}
+We'd like to express our deepest thanks to our advisor and mentor Dr. Christine Parlour. Her expertise and many insights significantly guided us in our exploration of decentralized exchanges. We'd also like to thank Dr. Eric Reiner, for his feedback and guidance.
+\vfill
+\hspace{0pt}
+\thispagestyle{empty}
+
+\clearpage
+\tableofcontents
+\thispagestyle{empty}
+
+\clearpage
+\printglossary[type=\acronymtype,nonumberlist,nopostdot]
+\thispagestyle{empty}
+
+\clearpage
+\doublespacing
+\pagenumbering{arabic}
+
+\section{Introduction}\label{sec:1}
+
+More than a decade ago, \cite{Bitcoin} proposed the Bitcoin electronic cash system: a peer-to-peer network that allows for direct online payments without the need of a financial intermediary. The underlying \gls{blockchain} technology has fueled the growth of a new and innovative financial ecosystem that has been coined \gls{defi}. Leveraging the \gls{blockchain} infrastructure, \gls{dapp} are actively being developed that are: robust, as they don't require centralized servers; transparent, since the code and data is stored on the public blockchain; and censorship resistant, allowing any party to transaction on the network as long as they follow the protocol's rules.
+
+\gls{dex} are one such \gls{dapp} that allow for secure, direct peer-to-peer cryptocurrency transactions without the need for an intermediary. Motivated by the novelty of these exchanges and their growing popularity in the cryptocurrency space, our report examines Uniswap v3, launched in May 2021, which is one of the largest and fastest growing DEXs, as can be seen in Figure \ref{fig:dex_trading_vol}. Uniswap v3 employs an automated market maker and features several enhancements to previous versions that improve capital efficiency and introduce competition into the Uniswap marketplace. In this paper, we aim to explain the return dynamics of Uniswap market makers, called \gls{lp}, explore whether the largest Uniswap v3 markets are in equilibrium, and understand empirically whether providing liquidity to such markets is profitable for LPs.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{Images/uniswapv3_volume.png}
+    \caption{DEX trading volume over time. (Source: theblockcrypto.com)}
+    \label{fig:dex_trading_vol}
+\end{figure}
+
+Our report is organized as follows: Section \ref{sec:1} introduces \glspl{dex} and reviews related work on Uniswap and other automated market maker protocols. Section \ref{sec:2} details Uniswap, outlining its implementation, key concepts, and mathematical underpinnings. Section \ref{sec:3} discusses arbitrage in Uniswap v3 and the importance of arbitrageurs in ensuring that the Uniswap market prices approximately track the true market price. Section  \ref{sec:4} explores liquidity provisioning in a Uniswap v3 market, and we present a series of simulations to illustrate the return dynamics for such an investment strategy. Section \ref{sec:5} empirically explores liquidity provisioning for some of the largest Uniswap v3 markets and evalutes whether such markets are in equilibrium. Section  \ref{sec:6} concludes with a summary of our findings and a brief discussion on future work. % PS: can add back in discussess areas for future work if we actually add that later
+
+\subsection{Background}
+
+In traditional markets, there are two main types of participants: liquidity takers and liquidity providers, commonly referred to as market makers. In markets organized around a \gls{clob}, professional market makers provide two-way prices, bid and ask, for an asset, supplying immediate liquidity. Liquidity takers execute against these prices and are provided with the ability to trade on demand. The cost of this liquidity is the bid-ask spread. Liquidity takers must cross the spread in order to execute an order, generating revenue for the market makers. \citet{BankInternationalSettlements} succinctly describes the importance of market makers in traditional markets: ``market-makers serve a crucial role in financial markets by providing liquidity to facilitate market efficiency and functioning."
+
+The increased demand for cryptocurrencies has led to the proliferation of traditional \gls{cex}, organized around \glspl{clob}, for such assets, such as Binance, Coinbase, and Kraken to name a few. However, the existence of traditional market makers - a role which is generally dominated by professional investors - and financial intermediaries introduce superfluous agents, defeating the purpose of decentralization. As such, DEXs have also exploded in popularity, especially among those in the \gls{defi} community. As of December 2021, \glspl{dex} held over \$72B worth of crypto assets and had a monthly trading volume of \$152B, making them a major player in cryptocurrency space. Compared to \glspl{cex}, \glspl{dex} currently account for approximately 13\% of total cryptocurrency trading volume and steadily rising, as shown in Figure \ref{fig:dex_cex_vol}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{Images/dex_to_cex_volume_percent.png}
+    \caption{DEX vs. CEX trading volume over time. (Source: theblockcrypto.com)}
+    \label{fig:dex_cex_vol}
+\end{figure}
+
+\glspl{dex} are ``\glspl{smartcontract}" - programs that reside and run on a blockchain. Most \glspl{dex} run on the Ethereum blockchain, which originally introduced smart contracts in 2013, or the Polygon blockchain, which is compatible with Ethereum smart contracts. Organizing an exchange as a smart contract introduces some interesting features: smart contracts are ``not controlled by a user, instead they are deployed to the network and run as programmed. User accounts can then interact with a smart contract by submitting transactions that execute a function defined on the smart contract. Smart contracts can define rules, like a regular contract, and automatically enforce them via the code. Smart contracts cannot be deleted by default, and interactions with them are irreversible" \citep*{EthereumSmartContracts}. Because users retain custody of their \glspl{token} when trading on a \gls{dex}, \glspl{dex} remove the custody risk that traders are exposed to when trading on \glspl{cex}, such as Binance and Coinbase, and provide additional utility to users who may benefit from having access to their tokens on the blockchain. Technically, \glspl{clob} could be organized as smart contracts. However, representing the state of the order book and supporting the complicated matching logic \glspl{clob} use would be extremely costly as users must pay for space and compute power in the smart contract environment \citep*{angeris2021analysis}.
+
+Instead, \glspl{dex} utilize \gls{amm} that use a relatively simple predefined set of rules to determine how trades are executed. In order to facilitate transactions, though, a \gls{dex} must have reserves, tokens that \glspl{lp} deposit in exchange for a portion of the transaction fees generated by the exchange. Most \glspl{dex} utilize a separate smart contract for each token pair that users want to trade; for example, Uniswap has a smart contract that enables users to trade \gls{weth} for USDC and another smart contract that allows users to trade \gls{wbtc} for USDC. Because the reserves provided by liquidity providers are pooled together in a smart contract, we commonly refer to these contracts as pools. Once a \gls{pool} has reserves, traders can trade with the contract based on the rules defined by the \gls{amm}.
+
+\glspl{amm} have been studied extensively in algorithmic game theory, starting with Hanson's logarithmic market scoring rule used in prediction markets \cite{LMSR}. Many of the most popular DEXs utilize a \gls{cfmm}, a family of \glspl{amm} that share certain mathematical and theoretical properties. \gls{cpmm} requires that any trade must change the reserves, denoted $x, y$, such that $xy = k$. In other words, the product of the reserves must remain unchanged after each trade. One notable drawback of this model is that the convexity of the function results in price impact when trading.
+
+Constant sum market makers are nother class of \glspl{cfmm}, characterized by the equation $x + y = k$. With this scheme, the sum of the reserves must remain constant after each trade. \citet{AMMClasses} note that, unlike \glspl{cpmm}, trading with a constant sum market maker results in no price impact. However, if the market price is variable, arbitrageurs ``may drain the [constant sum market maker] of one token for the other."
+
+The constant mean market maker generalizes the \gls{cpmm} and, for reserves $(x_1, x_2, x_3, \dots, x_n)$, is characterized by the equation $\prod_{i=1}^{n}x_i^{w_i} = k$, where $\sum_{i=1}^{n}w_i = 1$. Balancer, another popular DEX, utilizes a constant mean market maker. This generalization allows for \glspl{amm} to handle $n \ge 2$ tokens. However, this scheme results price impact and increased complexity. Hybrid function market makers have also been introduced that aim to incorporate the benefits of different \gls{amm} models, such as reducing price impact (as in constant sum market makers) while simultaneously preventing reserves being drained during trading (as in constant product market makers). Figure \ref{fig:amm_schemes} illustrates these three \gls{amm} schemes.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{Images/types_of_amms.png}
+    \caption{Different \gls{amm} schemes (Source: Curve Whitepaper, curve.fi)}
+    \label{fig:amm_schemes}
+\end{figure}
+
+% PS: maybe expand on this? could also use a sentence at the end to bridge to the next section
+The Uniswap v1 protocol, released in November 2018, was the first decentralized platform to utilize a \gls{cpmm}. While quite successful, Uniswap v1 required that all trades occur through \gls{eth}, which resulted in serious transfer limitation and additional costs. Uniswap v2 was released in May 2020, allowing for common token pairs to be exchanged without using ETH as an intermediary. Uniswap v3, launched in May 2021, addresses issues related to capital efficiency in Uniswap v2 pools. Most notably, Uniswap v3 allows \glspl{lp} to concentrate their liquidity by ``bounding" it within an desired price range. This feature allows \glspl{lp} to execute various provisioning strategies, which not only may improve capital efficiency, but also introduce competition between \glspl{lp}.
+
+\subsection{Related Work}
+
+While Uniswap v3 is still quite new, there has been some notable research on earlier versions of Uniswap and other \glspl{amm} that provides a foundation for understanding the dynamics of such markets and the risks and returns of providing liquidity to an AMM.
+
+\citet{angeris2021analysis} provide a comprehensive analysis of \glspl{cpmm}, such as Uniswap v2, including deriving theoretical price bounds for a pool's price compared to the true market price due to arbitrage. Guillaume Lambert has series of Medium posts, including \citet{LambertMedium1}, \citet{LambertMedium2}, and \citet{LambertMedium3}, that derive several important properties of Uniswap v3, including examining the value of an \gls{lp}'s investment through the lens of option pricing and providing several suggestions on how to effectively provide capital to a Uniswap v3 pool. \citet{ClarkReplicatingPortfolio} also looks at Uniswap v3 through an option pricing framework and derives the the replicating portfolio of a constant product market with bounded liquidity.
+
+\citet{Lehar2021DecentralizedE} compare Uniswap v2 pools to traditional \gls{clob} markets and characterizes the equilibrium liquidity for Uniswap v2 pools, providing evidence that existing Uniswap v2 pools are stable in practice. Additionally, consistent with traditional \gls{clob} markets, the authors find that pools are larger (i.e., have more liquidity) the lower the volatility of the token price and the higher the level of liquidity trades compared to informed trades. \citet{Aoyagi2020LiquidityPB} develops a model for the equilibrium liquidity of a Uniswap v2 market, showing that the ``equilibrium size of market liquidity tends to be stable and does not diverge or evaporate even if a (small) temporary shock hits the market."
+
+Two of the most relevant papers related to providing liquidity in Uniswap v3 actually arrive at quite different conclusions. \citet{neuder2021strategic} explore a class of ``reset" strategies - whereby a position is rebalanced once the pool's price moves too far from the center of the \gls{lp} position - for providing liquidity in Uniswap v3. The authors find that simple LP strategies for Uniswap v3 can earn over 200x more than providing liquidity in Uniswap v2, at least in their stylized environment. On the other hand, \citet{loesch2021impermanent} explores impermanent loss for Uniswap v3 and find that the majority of \glspl{lp} do not outperform a simple long only strategy, holding the assets that would have otherwise been invested in the pool, and that approximately 50\% of \glspl{lp} experience negative returns on their capital.
+
+\section{Uniswap}\label{sec:2}
+
+Uniswap v3 builds on Uniswap v2, introducing several new features, such as concentrated liquidity, that result in a more complicated protocol. As such, we first introduce Uniswap v2 and its mechanics before diving into Uniswap v3 in detail.
+
+\subsection{Uniswap v2}
+
+Each Uniswap smart contract is setup to allow traders to swap a single pair of tokens (e.g., \gls{weth}/USDC, WBTC/USDT, etc.). Utilizing the notation of the Uniswap v3 white paper for consistency across sections, we denote \texttt{token0} as the risky asset token and \texttt{token1} as the numeraire token. In order for traders to swap tokens in the pool, liquidity providers (LPs) must provide the pool with reserves of \texttt{token0}, $x$, and reserves of \texttt{token1}, $y$. The price of \texttt{token0} in terms of \texttt{token1} for the pool is then $p = \frac{y}{x}$. When a pool is created, the initial reserves deposited into the pool define the pool's price. However, if an \gls{lp} wants to contribute new reserves to the pool or remove their existing reserves from the pool, they must do so at the prevailing price ratio (see equations~\eqref{eq:3} and~\eqref{eq:4} below). In return for providing liquidity to a pool, Uniswap \glspl{lp} receive UNI tokens that entitle them to a portion of the transaction fees generated when traders swap tokens.
+
+% PS: might not be the best place to introduce gas costs, so I'm open to moving this paragraph.
+% It is important to note that every transaction between a user and the pool, including both swapping and adding/removing liquidity, incurs a transaction cost, or gas fee. Gas fees on the Ethereum blockchain are quoted in units of gwei, where 1 gwei is $10^{−9}$ ETH. Each transaction requires a a known number of individual, low-level computational steps, each of which requires a known amount of gas, which is independent of market conditions \citep{Lehar2021DecentralizedE}. While the amount of gas to execute a transaction may be fixed, users offer additional amounts of ETH as an incentive to the miners so that their transactions will be included in a block \citep{Lehar2021DecentralizedE}. Users that offer more ETH will be prioritized by miners and will have their transactions executed before other users that offer less ETH, and such incentive fees can vary with market conditions \citep{Lehar2021DecentralizedE}. While Ethereum has made several improvements to reduce gas costs, high gas costs on the Ethereum block chain are a known issue and can results in high transaction costs for both traders and LPs in a Uniswap pool.
+
+% PS: any reason for removing the incentive fee? I feel like that is important, but happy to discuss
+It is important to note that every transaction between a user and the pool, including both swapping and adding/removing liquidity incurs a \gls{gas}. Gas fees are costs associated with executing transactions on the \gls{blockchain}. Each transaction requires a known number of computational steps, each of which requires a known amount of gas, which is independent of market conditions \citep{Lehar2021DecentralizedE}. While Ethereum has made several improvements to reduce gas costs, high gas costs on the Ethereum block chain are a known issue and can results in high costs for both traders and \glspl{lp} in a Uniswap pool.
+
+Once a pool has reserves, traders can then use the liquidity in the pool to swap tokens. If a trader wants to swap $\frac{\Delta y}{1 - \gamma}$ of \texttt{token1}, where $\gamma$ is the percentage transaction fee, for $-\Delta x$\footnote{In our formulation, $\Delta y$ and $\Delta x$ have different signs, so swapping $\frac{\Delta y}{1 - \gamma} > 0$ of \texttt{token1} results in $\Delta x < 0$, so the trader receives $-\Delta x$.} of \texttt{token0} (i.e., buy the risky asset token), Uniswap requires that the following must hold \citep{constantproductmarkets}:
+\begin{gather}
+    (x + \Delta x)(y + \Delta y) = k = xy \label{eq:1}\\
+    \Delta x = \frac{k}{(y + \Delta y)} - x \label{eq:2}
+\end{gather}
+In other words, any trade must change the reserves so that, in the absence of fees, the product of reserves remains equal to a constant, $k$. Note that if a trader swaps $\frac{\Delta y}{1 - \gamma}$ of \texttt{token1}, only $\frac{\Delta y}{1 - \gamma} (1 - \gamma) = \Delta y$ is used in the \gls{cpmm} formula above; the remainder $\frac{\Delta y}{1 - \gamma} \gamma$ is the transaction fee for the swap, which is added to the pool's reserves, increasing $k$. Immediately after a swap, the pool's state changes as follows:
+\begin{align*}
+    y' &= y + \frac{\Delta y}{1 - \gamma} \\
+    x' &= x + \Delta x \\
+    k' &= \bigg( y + \frac{\Delta y}{1 - \gamma} \bigg)(x + \Delta x) = k + \frac{\gamma \Delta y}{1 - \gamma} (x + \Delta x) > k \\
+    p' &= \frac{y + \frac{\Delta y}{1 - \gamma}}{x + \Delta x}
+\end{align*}
+Additionally, it is important to note that fees are collected in the tokens swapped into the pool: if trader swaps \texttt{token1} for \texttt{token0} (buys the risky asset token), fees are collected in \texttt{token1} whereas, if a trader swaps \texttt{token0} for \texttt{token1} (sells the risky asset token), fees are collected in \texttt{token0}, resulting a slight change to the formulas above.
+
+The $xy = k$ \gls{cpmm} formulation results in a bonding curve that determines the price impact, $\Delta p$, from a swap. Figure \ref{fig:bonding_curves} below illustrates different bonding curves for different values of $k$. The steepness of the bonding curve corresponds to the price impact from swapping. We show below that, as $k$ increases, the bonding curve becomes less steep and the price impact for any swap is reduced.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{Images/bonding_curves.png}
+    \caption{Bonding curves for various values of $k$.}
+    \label{fig:bonding_curves}
+\end{figure}
+
+
+\noindent We can use equation~\eqref{eq:1} and the fact that $p = \frac{y}{x} = \frac{y^2}{k}$ to determine the price impact from swapping in the absence of fees ($\gamma = 0$):
+\begin{gather*}
+    p + \Delta p = \frac{y + \Delta y}{x + \Delta x} \\
+    \Delta p = \frac{(y + \Delta y)^2}{k} - p \\
+    \Delta p = \frac{2 \Delta y + \Delta y^2}{k}
+\end{gather*}
+Using this relationship we can see that as $k \rightarrow \infty$, $\Delta p \rightarrow 0$. $k$ can therefore be thought of as a measure of liquidity. Consistent with traditional markets, pools with more liquidity result in less price impact for traders.
+% PS: maybe clean up the language of this last sentence it falls a little flat IMO
+
+% TODO: CHECK THE MATH!
+To make the mechanics of Uniswap v2 more concrete, we proceed with a simple example. Let's assume that we have a pool with a 1\% transaction fee\footnote{All Uniswap v2 pools have a fee of 0.3\%. The highest fee for a Uniswap v3 pool is 1\%, but most pools have lower fees of either 0.3\% or 0.05\%, depending on the volatility and popularity of the tokens.} and with existing reserves of 800 of \texttt{token1} and 8 \texttt{token0}. The pool's current price is $p=\frac{y}{x}=\frac{800}{8}=100$ and $k=xy=6,400$. If a new \gls{lp} arrives, they must contribute tokens at a ratio of 100 of \texttt{token1} for every 1 of \texttt{token0}. If the LP contributes 200 of \texttt{token1} and 2 of \texttt{token0} - a position worth $200 + 2 p = 400$ of \texttt{token1}, the numeraire asset in our example - the new reserves are now 1,000 and 10, respectively, and the LP has contributed 20\% of the total reserves and will, therefore, be entitled to 20\% of the reserves, including fees generated, when they remove their position. After this transaction, $k=10,000$, but the price remains unchanged. Adding liquidity to a pool has no effect on the pool's price. Now, a trader arrives and wants to buy \texttt{token0}; they swap in $\frac{100}{1 - 0.01} = 101.01$ of \texttt{token1}. $101.01(0.01) = 1.01$ of their swap is collected as transaction fees and the remaining $100$ is used to determine how much of \texttt{token0} they receive:
+\begin{gather*}
+    \Delta x = \frac{k}{(y + \Delta y)} - x \\
+    \Delta x = \frac{10,000}{(1,000 + 100)} - 10 \approx -0.909
+\end{gather*}
+The trader receives approximately 0.909 of \texttt{token0}. The reserves of the pool - and, therefore, the pool's price - have changed, though. Now, the pool has 1,101.01 of \texttt{token1} and 9.09 of \texttt{token0}, so the pool's new price is $p' = 121.12$. If the LP now decides to withdraw his position, he can extract 20\% of the pools reserves at the current ratio, and he receives 220.20 of \texttt{token1} and 1.818 of \texttt{token0}. The total value of his position, including fees collected, denominated in \texttt{token1} is $220.20 + 1.818 p' = 440.40$.
+
+To create (remove) an \gls{lp} position with $\Delta L = \sqrt{k}$ liquidity\footnote{The reason for using the $\Delta L$ notation will become clear when we discuss Uniswap v3.}, an LP must contribute (receive) $\Delta X$ and $\Delta Y$ of \texttt{token0} and \texttt{token1}, respectively:
+\begin{gather}
+    \Delta Y = \Delta L \sqrt{p} \label{eq:3}\\
+    \Delta X = \Delta L \frac{1}{\sqrt{p}} \label{eq:4}
+\end{gather}
+
+
+Let us assume that an LP created their position when the pool's price was $p$, contributing $\Delta X, \Delta Y$ to the pool. When the LP liquidates their position at the new price, $p'$, the LP receives $\Delta X', \Delta Y'$. When $p' > p$, $\Delta Y' > \Delta Y$ and $\Delta X' < \Delta X$, so an LP receives more of the numeraire asset and less of the risky asset, which has appreciated in value. Conversely, when $p' < p$, $\Delta Y' < \Delta Y$ and $\Delta X' > \Delta X$, so an LP receives less of the numeraire asset and more of the risky asset, which has depreciated in value. In other words, when an informed arbitrageur trades, moving the pool's price, they effectively rebalance the LP's portfolio at disadvantageous terms, which constitutes a form of adverse selection \citep{Lehar2021DecentralizedE}.
+As compensation for such risk, though, LPs earn fees from transactions, including any trades from informed arbitrageurs.
+
+Using equations~\eqref{eq:3} and~\eqref{eq:4} above, we can easily compute the value of an LP position (again in the absence of fees), assuming that the pool price, $p$, equals the market price of the risky asset:
+\begin{gather*}
+    V(p) = \Delta Y + p \Delta X = 2 \Delta L \sqrt{p} = 2 \sqrt{k p}
+\end{gather*}
+Further, the gross return on such a position is given by:
+\begin{gather*}
+    \frac{V(p')}{V(p)} = \frac{2 \sqrt{k p'}}{2 \sqrt{k p'}} = \sqrt{\frac{p'}{p}}
+\end{gather*}
+% need to cite
+As Uniswap and other \glspl{amm} became popular, investors began to compare \gls{lp} returns to the returns of simply holding the assets. The relative difference between an LP's ending value and the value of a long position in the initial assets invested was dubbed ``impermanent loss" (IL) by \citet{PintailMedium}. If an investor was to simply hold the assets invested that would have been used to provide liquidity in the pool - the ``HODL" strategy - the value of the portfolio at the new price, $p'$, would be:
+\begin{gather*}
+    \text{HODL}(p') = \Delta Y + p' \Delta X \\
+    = \sqrt{kp} + p\frac{p'}{p} \frac{\sqrt{k}}{\sqrt{p}} \\
+    = \sqrt{kp} \bigg( 1 + \frac{p'}{p} \bigg)
+\end{gather*}
+We can now defined IL as:
+\begin{gather}
+    \text{IL}\bigg( \frac{p'}{p} \bigg) = \frac{V(p')}{\text{HODL}(p')} - 1 \nonumber \\
+    = \frac{2 \sqrt{k p \frac{p'}{p}}}{\sqrt{kp} \bigg( 1 + \frac{p'}{p} \bigg)} - 1 \nonumber \\
+    = \frac{2 \sqrt{\frac{p'}{p}}}{1 + \frac{p'}{p}} - 1 \label{eq:5}
+\end{gather}
+Figure \ref{fig:impermanent_loss} plots equation~\eqref{eq:5} as a function of $\frac{p'}{p}$. The loss is minimized at $\text{IL}\bigl( \frac{p'}{p} = 1 \bigl) = 0$, so, in the absence of fees, providing liquidity always under-performs the long portfolio, which is a direct result of adverse selection - i.e., the LP's portfolio being rebalanced against them. IL is purely a return concept and does not account for the fact that the long portfolio and the LP position have notably different risk profiles, especially when including fees, which we explore more during our discussion of Uniswap v3. IL, however, does make it clear that fees earned are a critical part of an LP's return and, in the absence of such fees, an LP is unlikely to earn substantial risk adjusted returns.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/impermanent_loss.png}
+    \caption{Impermanent loss as a function of $\frac{p'}{p}$.}
+    \label{fig:impermanent_loss}
+\end{figure}
+
+Despite its popularity, Uniswap v2 suffers from low capital efficiency. When an \gls{lp} supplies liquidity, the liquidity is distributed across the whole space of prices (i.e. $p \in (0, \infty)$). As such, a significant portion of the assets provided to the pool are not involved in facilitating swaps, especially if the token pair has a relatively stable price ratio, such as stable coin pairs. As such, LPs collect fewer fees (relative to their contribution) and the pool experiences higher price impact. Uniswap v3, which we discuss next, introduced \gls{concen_liq} to address these issues.
+
+\subsection{Uniswap v3}
+
+In Uniswap v2, LPs simply decide how much liquidity they want to contribute to the pool and the amounts of \texttt{token0} and \texttt{token1} they provide are wholly determined by the pool's price. Such liquidity provided to the pool was effectively distributed uniformly across the entire price range $(0, \infty)$, resulting in a single bonding curve $xy=k$. Uniswap v3 uses the same \gls{cpmm} curve as Uniswap v2, but introduced the concept of  \gls{concen_liq}. In the Uniswap v3 pools, LPs can now bound their liquidity within an arbitrary price range, improving ``capital efficiency and allow[ing] LPs to approximate their preferred reserves curve, while still being efficiently aggregated with the rest of the pool" \citep{Uniswapv3}.
+
+% PS: maybe change p_u and p_i to p(i_u) and p(i_l) here to be consistent with the rest of the paper
+Consistent with the Uniswap v3 white paper, we refer to liquidity within a given price range as a position. Each position needs enough reserves to support trading within its range: a position needs enough of \texttt{token0} to cover price movements to its upper bound as a trader swapping in \texttt{token1} and receiving \texttt{token0} pushes the price up, and enough of \texttt{token1} to cover price movements to its lower bound as a trading swapping in \texttt{token0} and receiving \texttt{token1} pushes the price down \citep{Uniswapv3}. Within this range, the pool acts like a \gls{cpmm}, similar to Uniswap v2, with larger reserves, known as ``virtual" reserves. Once the price moves outside of the range of a position, the position's liquidity is no longer active, so no fees can be earned, and the position is composed entirely of a single token: if the price, $p$, is above the position's upper range, $p_u$, the position is composed of \texttt{token1} whereas, if the price is below the position's lower range, $p_l$, the position is composed of \texttt{token0} \citep{Uniswapv3}. LPs can create as many positions as they want, allowing LPs to distribute liquidity along the space of prices as they see fit. However, because adding or removing liquidity to a pool imposes a gas fee on the LP, creating many very small positions would be very costly in practice. Multiple LP positions can be aggregated to form a ``liquidity curve", $L(p)$, which tell us how much liquidity is available in the pool at any given price. A simplified Uniswap v3 liquidity curve is presented in Figure \ref{fig:uniswap_v3_sample_liq_curve}.
+
+\vspace{1cm}
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}
+        % \draw[--, > = stealth, thick] (0,-2)--(0,0.5);
+        \draw[--, > = stealth, thick] (0,-2)--(10,-2);
+        \filldraw[draw=black, fill=blue!25] (2,-2) rectangle ++(6, 1.25);
+        \filldraw[draw=black, fill=orange!25] (4,-0.75) rectangle ++(2, 1.25);
+        % \filldraw[draw=black, fill=orange!25] (5,-1.55) rectangle ++(5, 1.25);
+        % \node[draw=none] at (0, -2.5) {0};
+        \node[draw=none] at (5, -2.5) {$p$};
+        \node[draw=none] at (2, -2.25) {\small $p_l$};
+        \node[draw=none] at (4, -2.25) {\small $p_l'$};
+        \node[draw=none] at (6, -2.25) {\small $p_u'$};
+        \node[draw=none] at (8, -2.25) {\small $p_u$};
+        % \node[draw=none] at (2.5, -1) {100 DAI};
+        % \node[draw=none] at (7.5, -1) {100 USD};
+        \draw[dashed] (5,-2)--(5,0.5);
+    \end{tikzpicture}
+    \vspace{0.5cm}
+    % PS: maybe mention the colors when describing the two LPs?
+    \caption{Sample liquidity curve for Uniswap v3. $LP_1$ has a position over $[p_l, p_u)$, and $LP_2$ has a position over $[p_l', p_u')$. For $p \in [p_l', p_u')$, both LPs collect fees proportional to their contribution in that range. Also, higher liquidity in this range reduces price impact. When $p$ leaves this range, $LP_1$ will collect 100\% of the fees, provided $p_l < p < p_u$. Otherwise, there is no liquidity and swaps can't be facilitated.}
+    \label{fig:uniswap_v3_sample_liq_curve}
+\end{figure}
+
+The implementation of \gls{concen_liq} required several changes from Uniswap v2. First, transaction fees are no longer added to a pool's reserves but set aside in a separate account. Second, the range of possible prices was divided in discrete ticks, which define the edges of an LP's position and determine how the tokens received from any swap are calculated. Next, we discuss the mechanics of Uniswap v3, focusing on the implementation changes related to \gls{concen_liq}.
+
+\subsubsection{Mechanics of Uniswap v3}
+
+Ticks are identified by their index, $i$, and a range between two ticks can be defined in terms of $i_l$, the lower tick index, and $i_u$, the upper tick index. A tick exists at every price that is an integer power of 1.0001:
+\begin{gather*}
+    p(i) = 1.0001^i
+\end{gather*}
+so that each tick is a 0.01\% (1 basis point) price movement away from its neighboring ticks \citep{Uniswapv3}. Each tick also identifies a range of prices. All prices within $[p(i), p(i+1))$ represent the tick $i$, and we can calculate the tick index for a given price as:
+\begin{gather*}
+    i = \lfloor \text{log}_{1.0001}(p) \rfloor
+\end{gather*}
+Additionally, each Uniswap v3 pool specifies a \texttt{tickSpacing} variable; only ticks with indexes that are divisible by \texttt{tickSpacing} can be used to define an LP's liquidity position \citep{Uniswapv3}. The smaller the \texttt{tickSpacing}, the more precisely \glspl{lp} can define their liquidity ranges. However, this also results in higher gas costs for traders as more calculations must be done to determine how much a trader receives from a swap \citep{Uniswapv3}.
+
+Within in each tick, liquidity is constant as no position can begin or end within a tick. As such, if a swap is small enough so that the price stays within the current tick, $i_c$, the contract acts like a \gls{cpmm}, $xy=k$. Unlike Uniswap v2, though, $x, y$ used in the \gls{cpmm} formulation are now virtual reserves. In fact, a Uniswap v3 smart contract actually tracks $L$ and $\sqrt{p}$ and uses these values to calculate the virtual reserves within the current tick, $i_c$, using the following formulas:
+\begin{gather}
+    L = \sqrt{xy} \label{eq:6}\\
+    \sqrt{p} = \sqrt{\frac{y}{x}}\label{eq:7}
+\end{gather}
+% PS: Need to fix equation referencing (not sure how it works right now)
+\citep{Uniswapv3}. Note that Uniswap v3 uses $L^2$ instead of $k$ to denote the constant product, but this is simply a change in notation from Uniswap v2: $L^2 = k$ in areas where $L$ is constant. Using equations~\eqref{eq:1},~\eqref{eq:6}, and~\eqref{eq:7}, we can also write $L$ as
+\begin{gather}
+    L = \frac{\Delta y}{\Delta \sqrt{p}}\label{eq:8}
+\end{gather}
+In other words, liquidity, $L$, can be thought of as the amount that \texttt{token1} reserves change for a given change in $\sqrt{p}$ \citep{Uniswapv3}. Let us assume that a trader wants to swap $\frac{\Delta y}{1 - \gamma}$ of \texttt{token1} for some amount of \texttt{token0}. $\gamma \frac{\Delta y}{1 - \gamma}$ is set aside as transaction fees and $(1 - \gamma) \frac{\Delta y}{1 - \gamma} = \Delta y$ is added to the pool. The pool then uses the following equations, which can be derived from equations~\eqref{eq:2} and~\eqref{eq:8}, to determine how much of \texttt{token0} the trader receives:
+\begin{gather}
+    \Delta \sqrt{p} = \frac{\Delta y}{L} \\
+    \Delta x = \Delta \frac{1}{\sqrt{p}} L
+\end{gather}
+Similarly, if $\Delta x$ is added to the pool, the following equations can be used to determine $\Delta y$:
+\begin{gather}
+    \Delta \frac{1}{\sqrt{p}} = \frac{\Delta x}{L} \\
+    \Delta y = \Delta \sqrt{p} L
+\end{gather}
+\citep{Uniswapv3}. Because fees from a swap are not added to the pool's reserves, swapping only changes $p$ (and $\sqrt{p}$), but not $L$; $L$ only changes when an LP adds or removes liquidity from the pool.
+
+% PS: this might be one of the most difficult concepts - so need to make sure this paragraph is crystal clear
+If the calculated $\Delta \sqrt{p}$ is large enough that the new price, $p'$, would move outside of the current tick, $i_c$, the swap is only partially executed within the current tick. I.e., $\Delta \sqrt{p}$ is limited to the difference between the current price, $\sqrt{p}$ and the price at the tick edge - either $\sqrt{p(i)}$ if swapping in \texttt{token0} or $\sqrt{p(i+1)}$ if swapping in \texttt{token1} - and partial $\Delta x, \Delta y$ are calculated for the current tick using this adjusted $\Delta \sqrt{p}$. After the swap is partially executed within the current tick, the contract must ``cross the tick", at which point liquidity, $L$, may change, depending on the liquidity at the new tick, and the swap continues to execute in this new tick in the same manner \citep{Uniswapv3}. This process continues until the amount of \texttt{token1} or \texttt{token0} swapped in is exhausted. If a swap pushes the price to the minimum or maximum tick that defines a liquidity position, after which there is no more liquidity, then a swap may only be partially executed. It is also important to note that fees are earned within each tick, in proportion to the amount of the swap that is executed within the tick. For example, if $\Delta y = 100$ but only 50 of \texttt{token1} is needed to push the price to the next tick, after which the remaining 50 of \texttt{token1} can be swapped, then 50\% of the fees are allocated to the first tick and 50\% of the fees are allocated to the second tick.
+
+Because swapping in Uniswap v3 requires moving tick-to-tick, adjusting liquidity as the swap progresses, it is difficult to arrive at simple, analytical formulas (such as equation~\eqref{eq:2} for Uniswap v2 above) for how much a trader receives from swapping one token for another. We can, however, use the Uniswap v3 equations above to come up with analytical approximations under certain assumptions.
+
+Recall that within a tick, where $L$ is constant, the following holds:
+\begin{gather*}
+    L = \frac{\Delta y}{\Delta \sqrt{p}} \implies \Delta y = L \Delta \sqrt{p}
+\end{gather*}
+For notational convenience, let $\sqrt{p} = q$. We start by trying to find the amount, $\Delta y$, such that swapping in $\Delta y$ of \texttt{token1} moves the the square root of the price from $q_0$ to $q_1 > q_0$. Let us assume that ticks can be arbitrarily spaced, so that $q_1 = q_0 + n \Delta q$ where $\Delta q = \frac{q_1 - q_0}{n}$. Additionally, we assume that $L$ is constant within each interval, regardless of the $n$ chosen, which we denote $L_i$. We can then calculate $\Delta y$ as
+\begin{gather*}
+    \Delta y = \sum_{i=1}^{n} L_i \Delta q
+\end{gather*}
+This takes a form similar to a left Riemann sum, and as we let $n \rightarrow \infty$ the above converges to the integral:
+\begin{gather}
+    \Delta y = \int_{q_0}^{q_1} L(q) dq
+\end{gather}
+and $L$ becomes a continuous function of $q$. In practice, $L(p)$ is a complex step function, but we allow $L(p)$ to be a smooth, continuous function for our approximations for simplicity. Note that, if $q_1 < q_0$, $\Delta y < 0$ and we would replace $L_i$ with $L_{i-1}$ above as we are swapping the other direction. In this case, the equation is a right Riemann sum, but still converges to the same integral.
+
+Now, if we assume that a pool's liquidity can be approximated, at least locally, by some continuous function, $L(q)$, and given the pool's current square root price, $q_0$, and a fixed amount to swap, $\Delta y$, we can find the resulting square root of the price, $q_1$. We start by assuming that $L(q)$ is linear in $q$ - i.e., $L$ is linear in the square root of the price - or that we can approximate $L$ as a linear function in $q$ around the current square root price $q_0$. Writing $L$ as:
+\begin{gather*}
+    L(q) = \alpha + \beta q
+\end{gather*}
+we can solve for $q_1$:
+
+\begin{gather}
+    % \Delta y = \int_{q_0}^{q_1} L(q) dq \nonumber \\
+    \Delta y = \int_{q_0}^{q_1} \big( \alpha + \beta q \big) dq \nonumber \\
+    \Delta y = \alpha q + \frac{\beta}{2} q^2 \bigg |_{q_0}^{q_1} \nonumber \\
+    \Delta y = \alpha q_1 + \frac{\beta}{2} q_1^2 - \alpha q_0 - \frac{\beta}{2} q_0^2 \label{eq:14}\\
+    \frac{\beta}{2} q_1^2 + \alpha q_1 - \big[ \alpha q_0 + \frac{\beta}{2} q_0^2 + \Delta y \big] = 0 \nonumber
+\end{gather}
+Note that when $\beta = 0$, the above reduces equation~\eqref{eq:2} for a Uniswap v2 swap. We can now use the quadratic formula to solve for $q_1$:
+\begin{gather}
+    q_1 = \frac{-\alpha \pm \sqrt{\alpha^2 - 4 \frac{\beta}{2} \big[ \alpha q_0 + \frac{\beta}{2} q_0^2 + \Delta y \big]}}{2 \frac{\beta}{2}} \nonumber \\
+    % don't think this row is necessary, but leaving in case we want to bring it back
+    % q_1 = \frac{-\alpha \pm \sqrt{\alpha^2 - 2 \alpha \beta q_0 + \beta^2 q_0^2 + 2 \beta \Delta y}}{\beta} \nonumber \\
+    q_1 = \frac{-\alpha + \sqrt{(\alpha + \beta q_0)^2 + 2 \beta \Delta y}}{\beta} \label{eq:15}
+\end{gather}
+We discard the negative solution as $q > 0$. Now, since we know what the final price is for a swap of size $\Delta y$, we can also calculate the amount of \texttt{token0} for the swap:
+\begin{gather}
+    \Delta x = \Delta \frac{1}{q} L \nonumber \\
+    % \Delta x = \Delta \frac{1}{q} \frac{\Delta y}{\Delta q} \nonumber \\
+    \Delta x = \bigg( \frac{1}{q_1} - \frac{1}{q_0} \bigg) \frac{\Delta y}{q_1 - q0} \nonumber \\
+    \Delta x = \frac{-\Delta y}{q_1 q_0}
+\end{gather}
+A natural linear approximation for $L(q)$ at $q_0$ is the tangent line, so we can use this this approximation for swaps where liquidity is changing linearly around the current square root price (q):
+\begin{gather*}
+    \hat{L}(q) = L(q_0) + L'(q_0) (q - q_0) \\
+    % \hat{L}(q) = L(q_0) + L'(q_0) q - L'(q_0) q_0 \\
+    \hat{L}(q) = (L(q_0) - L'(q_0) q_0) + L'(q_0) q  \\
+    \implies \alpha(q_0) = L(q_0) - L'(q_0) q_0 \hspace{0.2cm} \text{and} \hspace{0.2cm} \beta(q_0) = L'(q_0)
+\end{gather*}
+With these formulas we can calculate the amount of \texttt{token0} bought or sold, $\Delta x$, for $\Delta y$ of \texttt{token1} and the new price of the pool immediately after the swap, $q_1$, in terms of $q_0, L(q), \Delta y$. While this is only an approximation, we use this formulation for swaps when trying to solve for the optimal arbitrage trade in the presence of non-constant liquidity in Uniswap v3 pools in Section \ref{sec:3}.
+
+% PS: check if the footnote here should be used in the Uniswap v2 section. I think that is where we introduce the capital letters.
+\Gls{concen_liq} also has an effect on the tokens an LP contributes to or receives from the pool. Unlike Uniswap v2, in which \glspl{lp} provide and receive tokens at the ratio defining the pool's price, the amount of \texttt{token0} and \texttt{token1} an LP contributes or receives depends on the position's range and current price: ``the amount of \texttt{token0} ($\Delta X$) or \texttt{token1} ($\Delta Y$) that needs to be
+deposited can be thought of as the amount that would be sold from
+the position if the price were to move from the current price ($p$) to
+the upper tick or lower tick (for \texttt{token0} or \texttt{token1}, respectively)" \citep{Uniswapv3}. The following equations are provided in the Uniswap v3 white paper, but can also be derived from the equations above\footnote{Note that we use capital $\Delta X, \Delta Y$ when describing tokens added or removed from the pool due to liquidity transactions and lower case $\Delta x, \Delta y$ when describing tokens added or removed from the pool due to swaps.}:
+\begin{gather}
+    \Delta Y =
+    \begin{cases}
+        0 & i_c < i_l \\
+        \Delta L \big( \sqrt{p} - \sqrt{p(i_l)} \big) & i_l \le i_c < i_u \\
+        \Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big) & i_c \ge i_u
+    \end{cases} \label{eq:17}\\
+    \Delta X =
+    \begin{cases}
+        \Delta L \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg) & i_c < i_l \\
+        \Delta L \bigg( \frac{1}{\sqrt{p}} - \frac{1}{\sqrt{p(i_u)}} \bigg) & i_l \le i_c < i_u \\
+        0 & i_c \ge i_u
+    \end{cases} \label{eq:18}
+\end{gather}
+where $\Delta L$ is the amount of liquidity added to the pool, $i_l, i_u$ are the ticks defining the position's lower and upper bounds, respectively, and $i_c$ is the tick for the pool's current price, $p$. As discussed above, when the pool's price is outside a position's range, the amount of tokens added to or removed from the pool is entirely composed on a single token. Only when the price is within the position's range does an LP add or receive both \texttt{token0} and \texttt{token1}.
+
+\subsubsection{Valuing a Uniswap v3 Position}
+
+Each LP position is defined by three variables, $\Delta L, p(i_l), p(i_u)$, but the tokens that such a position is entitled to is determined by~\eqref{eq:17}  and~\eqref{eq:18} above. As such, we can use these equations to determine the value of an LP position, excluding accrued fees, for any given value of $p$. We use a similar derivation for the value of the position as \citep{LambertMedium1}, but use the notation of the Uniswap v3 white paper for consistency. The value of any position, denominated in the numeraire token, is simply:
+\begin{gather*}
+    V(p) = \Delta Y + p \Delta X
+\end{gather*}
+Using the formula~\eqref{eq:17} and~\eqref{eq:18} above for $\Delta X, \Delta Y$, we can write the value of the position as:
+\begin{gather}
+    V(p) =
+    \begin{cases}
+        \Delta L p \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg) & i_c < i_l \\
+        \Delta L \bigg( 2 \sqrt{p} - \frac{p}{\sqrt{p(i_u)}} - \sqrt{p(i_l)} \bigg) & i_l \le i_c < i_u \\
+        \Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big) & i_c \ge i_u
+    \end{cases} \label{eq:19}
+\end{gather}
+In all cases, the value of the position scales linearly with $\Delta L$, so we can think of this term as a notional value that determines the size of the initial position. The value of the position scales differently with $p$ depending on the range of the position selected. We plot the value of a position with $\Delta L = 1$ in Figure \ref{fig:lp_position_value} below.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/lp_position_value.png}
+    \caption{Value of an LP's position as a function of $p$ for $\Delta L = 1$.}
+    \label{fig:lp_position_value}
+\end{figure}
+
+As the range of the position gets smaller, the value curve becomes ``sharper" and as $p(i_l) \rightarrow p(i_u)$, the value converges to the payoff diagram of a covered call or a cash covered short put, again, excluding any fees earned \citep{LambertMedium1}. Formula (19) provides us with the value of the position for any given value of $p$, but what is the expected value of some investment with a fixed time horizon, $T - t$, at the current price, $p_t$? While finding the discounted, expected value of the position is difficult analytically, we can use well known results from option pricing to find a portfolio that statically replicates the payoff of the position at ``maturity." Similar to \citet{ClarkReplicatingPortfolio}, we can use the results of \citet{Carr98towardsa} to decompose the value of the position into a portfolio of bonds, forwards, and puts and calls on the risky asset, \texttt{token0}. \citet{Carr98towardsa} show that, in the absence of arbitrage, the value of a twice differential payoff at time $t$ with time-to-maturity $T - t$ can be written as:
+\begin{gather*}
+    V_t(S_t) = e^{-r(T-t)} V_T(p_T = K^*) + V'_T(S_T = K^*)(S_t - K^* e^{-r(T-t)}) \\
+    + \int_0^{K^*} V''_T(K) P_t(S_t, K) dK + \int_{K^*}^{\infty} V''_T(K) C_t(S_t, K) dK
+\end{gather*}
+where $S_t$ is the value of the underlying at time $t$, $r$ is the risk free rate, $P_t(S_t, K), C_t(S_t, K)$ are the values of a put and call, respectively, both with strike $K$ and time-to-maturity $T - t$, and $K^*$ is an arbitrary ``starting" strike. To create such a portfolio, we must first calculate the first and second derivatives of the payoff:
+\begin{gather*}
+    \frac{dV}{dp} =
+    \begin{cases}
+        \Delta L \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg) & i_c < i_l \\
+        \Delta L \bigg( \frac{1}{\sqrt{p}} - \frac{1}{\sqrt{p(i_u)}} \bigg) & i_l \le i_c < i_u \\
+        0 & i_c \ge i_u
+    \end{cases}  \\
+    \frac{d^2 V}{dp^2} =
+    \begin{cases}
+        0 & i_c < i_l \\
+        \frac{-\Delta L}{2 p^{\frac{3}{2}}} & i_l \le i_c < i_u \\
+        0 & i_c \ge i_u
+    \end{cases}
+\end{gather*}
+If we select $K^* = p(i_u)$, and note that $S_t = p_t$ (where we assume that the pool's price equals the market price), then we can write the current value of the position as:
+\begin{gather}
+    V_t(p_t) = e^{-r(T-t)} \Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big)
+    + \int_{p(i_l)}^{p(i_u)} \frac{-\Delta L}{2 K^{\frac{3}{2}}} P_t(p_t, K) dK \label{eq:20}
+\end{gather}
+This formulation illustrates that the value of the \gls{lp} position is the value of a bond plus a portfolio of short put options on \texttt{token0} with strikes between $p(i_l)$ and $p(i_u)$. Analogous a covered call or a cash covered short put, in which the investor collects the premium from selling an option, the LP gives up some of the upside in the risky asset in order to collect transaction fees. While impermanent loss is widely discussed in the crypto community, comparing an LP's position to a long position in the risky asset is not a valid comparison; we can clearly see that an LP's position would have a very different volatility than a long position in \texttt{token0}. While option pricing provides an interesting lens through which to understand the value of an LP's position, we leave this as an area for future work as devising a model for the fees earned by an LP is much more difficult than deriving equation~\eqref{eq:20} given the complex and competitive dynamics of a Uniswap v3 pool.
+
+% probably move the capital inefficiency section into here (with some edits for consistency)
+\subsubsection{Capital Efficiency}
+
+In Uniswap v2, LPs contribute capital to the entire space of prices, $(0, \infty)$. However, most of this capital is largely idle as swaps generally occur within a relatively tight range of prices. To illustrate this ineffective deployment of capital, consider a hypothetical Uniswap v2 stable coin pair USDC/DAI pool, represented by Figure \ref{fig:capital_inefficiency_price_diagram}. If an LP wants to contribute $\Delta L = \sqrt{k} = 10$ liquidity to the pool, they must contribute contribute 10 DAI and 10 USDC, (represented by the red are in Figure \ref{fig:capital_inefficiency_price_diagram}). This represents a 10\% stake in the pool. Given that both tokens are stable coins (i.e. pegged to an external value; in this case, pegged to USD), it is reasonable to assume that the price, $p$ will remain in $[0.99, 1.01]$. If a trader arrives and swaps 0.5 DAI, after fees, for $\Delta x = \frac{k}{(y + \Delta y)} - x = 0.4975$ USDC, the price moves from $p = 1.0 \to p' \approx 1.01$. Only $\Delta x \times 10\% \approx 0.05$ USDC of the 10 USDC tokens that the LP contributed are actually involved in the swap.
+
+\vspace{0.5cm} % fix spacing between image and paragraph
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}
+        \draw[--, > = stealth, thick] (0,-2)--(0,0);
+        \draw[--, > = stealth, thick] (0,-2)--(10,-2);
+        \draw[dashed] (5,-2)--(5,-1.55);
+
+        \filldraw[draw=black, fill=blue!25] (0,-1.55) rectangle ++(5, 1.25);
+        \filldraw[draw=black, fill=orange!25] (5,-1.55) rectangle ++(5, 1.25);
+        \filldraw[draw=black, fill=purple!50] (0,-0.55) rectangle ++(5, 0.25);
+        \filldraw[draw=black, fill=purple!50] (5,-0.55) rectangle ++(5, 0.25);
+
+        \node[draw=none] at (0, -2.5) {0};
+        \node[draw=none] at (5, -2.5) {1.0};
+        \node[draw=none] at (2.5, -1) {100 DAI};
+        \node[draw=none] at (7.5, -1) {100 USDC};
+    \end{tikzpicture}
+    \vspace{0.5cm}
+    \caption{Continuous price range of USDC/DAI, determined by the ratio of the assets in the pool: $\frac{100 \text{DAI}}{100 \text{USDC}} = 1.0$. The red region is the contribution from an LP that represents 10\% of the pool}
+    \label{fig:capital_inefficiency_price_diagram}
+\end{figure}
+
+\Gls{concen_liq} in Uniswap v3 increases capital efficiency as far fewer tokens are required to create a comparable amount of liquidity around a bounded range. To add $\Delta L$ liquidity to a pool in Uniswap v2, an LP contributes (see equations~\eqref{eq:3} and~\eqref{eq:4} above):
+\begin{gather*}
+    \Delta Y = \Delta L \sqrt{p}, \hspace{0.5cm} \Delta X = \frac{\Delta L}{\sqrt{p}}
+\end{gather*}
+to the pool. However, in Uniswap v3, an LP only needs to contribute (see equations~\eqref{eq:17} and~\eqref{eq:18} above):
+\begin{gather*}
+    \Delta Y = \Delta L \big( \sqrt{p} - \sqrt{p(i_l)} \big) < \Delta L \sqrt{p} \\
+    \Delta X = \Delta L \bigg( \frac{1}{\sqrt{p}} - \frac{1}{\sqrt{p(i_u)}} \bigg) < \frac{\Delta L}{\sqrt{p}}
+\end{gather*}
+Note that we assumed that $p(i_l) < p < p(i_u)$ for simplicity and comparability. As the position's range becomes larger, $p(i_l) \rightarrow 0, p(i_u) \rightarrow \infty$, the amount of tokens a Uniswap v3 LP must contribute to the pool converges to the Uniswap v2 amounts. Conversely, as the position's range becomes smaller, $p(i_l) \rightarrow p, p(i_u) \rightarrow p$, the amount of tokens required becomes very small. As such, as long as the pool's price stays within the position's range, an LP can contribute a relatively large amount of liquidity to the pool with a relatively small investment of \texttt{token0} and \texttt{token1}.
+
+Going back to our example above, a Uniswap v3 LP could contribute $\Delta L = 10$ liquidity to the USDC/DAI pool, with $p = 1.0$ and a range of $p(i_l) = 0.99, p(i_u) = 1.01$ for:
+\begin{gather*}
+    \Delta Y = 10 \big( \sqrt{1} - \sqrt{0.99} \big) \approx 0.5 \\
+    \Delta X = 10 \bigg( \frac{1}{\sqrt{1}} - \frac{1}{\sqrt{1.01}} \bigg) \approx 0.5
+\end{gather*}
+Because we expect the price to stay within such a tight range, the LP contributes 95\% fewer tokens to supply same level of liquidity to the pool. In fact, if the same trade discussed above were to occur, all of the LP's tokens would be utilized to facilitate the trade. If the LP still wanted to contribute 10 USDC and 10 DAI, he could create a position with $\Delta L = 2,000$, significantly increasing liquidity and reducing the price impact from swaps.
+
+If the price stays within the range, a Uniswap v3 LP earns the same amount of fees as a Uniswap v3 LP, but with a smaller required capital outlay, increasing the returns of the LP. Unfortunately, such amplified gains come at a cost. \citet{LambertMedium3} shows that IL becomes increasingly worse as the position's range tightens\footnote{In fact, IL in Uniswap v3 is always worse than in Uniswap v2 where a position's range is always $(0, \infty$).}, which, again, is a direct consequence of negative portfolio rebalancing due to adverse selection. Given that a Uniswap v3 position amplifies both the gains and losses of a comparable Uniswap v2 position by reducing the capital required for the position, we can think of a Uniswap v3 position as a leveraged Uniswap v2 position limited to a range, with the amount of leverage increasing as the position's range tightens and fewer tokens are required to fund the position.
+
+\section{Arbitrage in Uniswap v3}\label{sec:3}
+
+Uniswap pools rely on the existence of arbitrageurs to ensure that the pool's price is close to the true market price. In fact, Uniswap v2 introduced ``\glspl{flashswap}", which allow users to effectively borrow assets from the pool and execute arbitrary logic as long as the assets are either returned along with a small fee or are paid for like a normal swap by the end of the transaction \citep{Uniswapv2}. Whereas in traditional markets arbitrageurs must have sufficient capital to take advantage of arbitrage opportunities, \glspl{flashswap} effectively allow anyone to perform capital free arbitrage.
+
+In the presence of transaction fees, gas costs, and other market frictions, trading from arbitrageurs will not move the pool's price all the way to true market price. \citet{angeris2021analysis} show that in Uniswap v2 pools, in the presence of transaction fees, $\gamma$, but no other market frictions, that the pool's price, $p$, bounds the true market price, $m$:
+\begin{gather*}
+    p (1 - \gamma) \le m < \frac{p}{1 - \gamma}
+\end{gather*}
+
+Unfortunately, because a Uniswap v3 pool's liquidity can take on arbitrary shapes, it is difficult to analytically arrive at such theoretical bounds for a pool's price. We can, however, use our swap approximations, equations~\eqref{eq:14} and~\eqref{eq:15}, to numerically solve the for optimal arbitrage when liquidity changes with $p$.
+
+When $m > p$, an arbitrageur can profit by borrowing \texttt{token1}, swapping it into the Uniswap v3 pool to receive \texttt{token0}, and converting \texttt{token0} at the market price, $m$, back into \texttt{token1} to repay the loan, profiting from the mispricing of the Uniswap pool. This process adds \texttt{token1} and removes \texttt{token0} from the pool's reserves pushing the the pool's price towards the market price. Since the arbitrageur is swapping in \texttt{token1}, fees are also collected in \texttt{token1}. The arbitrageur, therefore, solves the following constrained optimization problem to determine how much of \texttt{token1} to borrow and swap:
+\begin{align*}
+    \max_{\Delta x, \Delta y} \hspace{0.5cm} &(-\Delta x) m - \frac{\Delta y}{1 - \gamma}
+\end{align*}
+
+This objective function is constrained as we require $-\Delta x > 0, \Delta y > 0$\footnote{Remember, if $\Delta y >$, then $\Delta x < 0$ in our formulation.} and that $\Delta x, \Delta y$ follow the \gls{cpmm} formula at each tick within where the swap is executed. Using our analytical approximations, with a linear approximation of $L(q)$, we can simplify the problem, removing some of the constraints:
+\begin{align} \label{eq:21}
+    \max_{\Delta y} \hspace{0.5cm} &-\frac{-\Delta y}{q_1 q_0} m - \frac{\Delta y}{1 - \gamma} \nonumber \\
+    %\text{subject to } & \Delta y > 0 \nonumber \\
+    = \max_{\Delta y} \hspace{0.5cm} &-\frac{-\Delta y}{q_0 \frac{-\alpha + \sqrt{(\alpha + \beta q_0)^2 + 2 \beta \Delta y}}{\beta}} m - \frac{\Delta y}{1 - \gamma} \nonumber \\
+    %\text{subject to } & \Delta y > 0 \nonumber \\
+    = \max_{\Delta y} \hspace{0.5cm} &\frac{\Delta y \beta m}{q_0 \big (-\alpha + \sqrt{(\alpha + \beta q_0)^2 + 2 \beta \Delta y} \big)} - \frac{\Delta y}{1 - \gamma} \\
+    \text{subject to } & \Delta y > 0 \nonumber
+\end{align}
+This equation can be easily solved numerically to approximate the optimal arbitrage in a Uniswap v3 pool with non-constant liquidity.
+
+In order to better understand how a Uniswap v3 pool's price bounds the market price in the presence of arbitrageurs and non-constant liquidity, we can simulate a Uniswap v3 market and compare the simulated price bounds to the theoretical price bounds for a Uniswap v2 pool. We use our Python Uniswap v3 simulator\footnote{Our simulator is based on the Uniswap v3 white paper and the actual Uniswap v3 project on GitHub: https://github.com/Uniswap/v3-core. Our implementation is a simplified version which includes only the core functionality and uses floating point precision rather than integer arthimetic.} for all simulations in this paper and implement the following simulation procedure:
+\begin{enumerate}
+    \item We assume that the market price, $m$, follows a geometric Brownian motion process with drift $\mu$ and volatility $\sigma$. We generate 30 days of trading with 2 \glspl{prinnv} per day for a total of 60 prices. We assume the there are no market frictions when trading at the market price outside of the Uniswap pool.
+
+    \item After each price innovation, a single liquidity trader arrives swapping enough to move the pool's price approximately 10\% above the current market price. The 10\% price movement was chosen so that the price moves outside of the theorteical Uniswap v3 price bounds for any reasonable fee rate, but is relatively arbitrary. A smaller value could be used, especially for pools with lower fee rates, without any impact to the analysis. Immediately after this liquidity trade, an arbitrageur arrives and solves the above optimization problem, equation~\eqref{eq:21}, trading enough to maximize their profit and moving the pool's price closer to the current market price. Next, another liquidity trader arrives, moving the pool's price approximately 10\% below the current market price. Once again, an arbitrageur arrives to take advantage of the new price deviation. We record the pool's price immediately after each arbitrage trade, which should provide us with the upper and lower bounds for the current price.
+
+    \item After these series of trades happen, we move to the next price innovation, repeating the above until we arrive at the end of the simulation.
+\end{enumerate}
+
+Because $L$ cannot be continuous nor is $L$ usually linear in $\sqrt{p}$, our arbitrage optimization problem is only an approximation. The closer $L$ is to a step function, the more discretization error is introduced. The more curvature $L$ exhibits, the worse the linear approximation becomes. To alleviate some of these errors, rather than having the arbitrageur only execute a single swap, we allow the arbitrageur to swap multiple times, incrementally moving the pool's price towards the market price until arbitrage is no longer profitable. In the presence of proportional transaction costs, $\gamma$, and no gas fees, executing a single, large swap is equivalent to executing several smaller swaps totaling the same amount of tokens swapped in; refer to Appendix B for a simple proof. This is unique to Uniswap v3. \citet{angeris2021analysis} show that, in Uniswap v2, splitting trades is always more expensive than trading an equivalent amount in a single trade. However, this is due to the fact that fees from each transaction are added to the pool's reserves in Uniswap v2, while, in Uniswap v3, fees are set aside in a separate account.
+
+In our implementation, an arbitrageur takes several small steps towards the current market price, using the secant line between the pool's current price and a target price as a linear (in the $\sqrt{p}$) approximation for $L$. After each step, the step size is reduced so that the linear approximation becomes more accurate as we approach the market price. For example, if $m=100, p=110$, an arbitrageur first trades to the target price of 105, using the secant line between 110 and 105 as an approximation for $L$. Once this swap is executed, the next target price becomes 102.5 and the arbitrageur swaps again, and finally the target price becomes 100 and the arbitrageur swaps again, assuming it is still profitable to do so.
+
+We performed the above simulation for multiple different fees, between 0.05\%, the lowest transaction fee for any Uniswap v3 pool, to 3\%, which is actually higher than the highest transaction fee, 1\%, for any pool. We explored the effect of non-constant liquidity by looking at different liquidity curves. Each curve is linear in price with varying slopes, but the liquidity at the initial price, $p=100$, is the same. Figure \ref{fig:linear_liquidity_curves} presents 6 different liquidity curves used, all of which are centered at $p=100, L(100)=5,000$ (though we note that the results are the same regardless of of the overall level of liquidity).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/arbitrage_liquidity_curves.png}
+    \caption{Linear liquidity curves for our price bound simulations.}
+    \label{fig:linear_liquidity_curves}
+\end{figure}
+
+In all cases, the simulated price bounds converged to the theoretical Uniswap v2 price bounds. Figure \ref{fig:price_bound_simulation} presents the results of one such simulation for $L(p) = 50p + 0$ with $\gamma = 0.03$. We present the 3\% fee simulation in the report as the larger fee results in a larger price bound, which is easier to see. However, we note that the results are the same for the smaller fees. We present the results for the different liquidity curves presented in Figure \ref{fig:linear_liquidity_curves} for 3 different price simulations in Appendix C.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/arbitrage_price_bounds.png}
+    \caption{Simulated price bounds for a $L(p) = 50p + 0$ with $\gamma = 0.03$.}
+    \label{fig:price_bound_simulation}
+\end{figure}
+
+These results suggest that the shape of the liquidity curve for Uniswap v3 pools does not effect the theoretical price bounds in the presence of sufficient arbitrageurs and no market frictions, including gas fees. While gas fees, like transaction fees, clearly increase the price bounds, the bound's invariance to the shape of $L$ indicates that Uniswap v3 pools are quite robust to multiple shapes and levels of liquidity curves that LPs may as a whole create.
+
+While the theoretical price bounds for Uniswap v3 may converge to the theoretical price bounds for Uniswap v2, the real quetion is whether there is sufficient arbitrage in practice that such price bounds are enforced. To determine whether the pool prices appropriately follow market prices, we obtained minute level price data from the Gemini exchange and use the average of the open-close, high-low prices for each minute as a proxy for the true market price, $m$, during each time interval. We then examined how often the pool's price deviated from the theoretical price bound, $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$, and how quickly such deviations were corrected. Figure \ref{fig:actual_price_bounds} shows the estimated market price (i.e., the reference value), the price bounds, and the second level pool prices for four Uniswap v3 pools on January 27, 2022. The pool's price clearly stays within the price bound for the larger 0.3\% fee pools. There are notable spikes in pool's price away from the reference value for the smaller 0.05\% fee pools; however, the price quickly moves back into the price bound (in many cases, the next swap corrects the price) and we do not see persistent deviations from the theoretical price bounds. \citet{Lehar2021DecentralizedE} note that attackers often deliberately push markets out of equilibrium, so it is not immediately clear whether these spikes are due to large liquidity traders or attackers trying to manipulate the pool's price. The longest deviation we identified for the pools we examined was approximately two hours on May 19, 2021, a day with relatively high volatility in the crypto markets and when the Uniswap v3 pools were still quite new.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth,trim={0 1cm 0 0}]{Images/actual_price_bounds.png}
+    \caption{Actual price bounds for four different WETH/stable coin pools on January 27, 2022. The theoretical price bounds, $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$, are identified by the blue bands. The x and y axes have been aligned across all images. In some cases, the deviations from the price bounds for the USDT/WETH pool actually extend off the plots. Note also that all prices are presented with the stable coin as the numeraire asset, which may differ from the pool's implementation.}
+    \label{fig:actual_price_bounds}
+\end{figure}
+
+\section{Liquidity Provisioning}\label{sec:4}
+
+% PS: maybe cut this down - not sure we need such an in depth example here
+With the introduction of  \gls{concen_liq} in Uniswap v3, LPs can now decide within what price range they want to provide liquidity, allowing LPs to execute various provisioning strategies. In addition to potentially improving capital efficiency, such decisions also result in competition between LPs, unlike Uniswap v2 where liquidity provisioning is not rivalrous \citep{Lehar2021DecentralizedE}. In Uniswap v2, LPs must decide whether their investment will generate enough fees to cover the risk of adverse selection, but no LP has a competitive advantage over others. This has changed with  \gls{concen_liq}. In the absence of gas costs - i.e., when there are no transaction costs to setting up or rebalancing a liquidity position - each Uniswap v3 LP could potentially center their liquidity around the current price, rebalancing their position as the price changes, similarly to how market makers in traditional \gls{clob} markets cancel and resubmit quotes as prices fluctuate. High gas costs on the Ethereum blockchain, however, are a known problem, and these costs actually give large LPs a potential advantage over smaller LPs in Uniswap v3 markets. A large LP, for which gas costs may constitute a relatively small fraction of their investment, will be able to more frequently rebalance their position, ensuring that their liquidity is always generating fees. For smaller LPs, though, frequent rebalancing may be prohibitively expensive, and they may need to provide liquidity within a larger range to ensure that their positions continue to generate fees as prices fluctuate. However, by spreading their capital over a larger range of prices, their proportion of fees earned at any one price will be smaller.
+
+In this section, we explore the returns to LPs in Uniswap v3. We begin by discussing how  \gls{concen_liq} has changed the level and shape of liquidity across the space of prices, which effects the amount of price impact that traders experience. Then, using simulations, we explore how LP returns vary by the number of liquidity traders in the market, the size of such liquidity trades, the dynamics of the true market price, and the level and shape of liquidity provided, as a whole, into the pool. Finally, we use data from the seven largest Uniswap v3 pools\footnote{We exclude pools that are stable coin pairs as there is very little price movement and liquidity is tightly centered around the pegged price.} as of February 2022 to understand whether providing liquidity in Uniswap v3 pools is profitable and whether such pools are in equilibrium.
+
+\subsection{Liquidity Curves}
+
+In Uniswap v2, all LPs provide liquidity across the whole space of prices, $p \in (0, \infty)$, so the liquidity curve is always flat. The liquidity curves that we observe in Uniswap v3, however, take on various shapes as these curves reflect LPs' combined decisions on how much liquidity to provide for any given price range. Figure \ref{fig:example_liquidity_curves} presents two such liquidity curves for the \gls{weth}/USDC and USDT/\gls{weth} pools on January  27, 2022\footnote{We do not show the scale of the y axis for the liquidity curves herein as liquidity, $L$, varies in scale based on different decimal conventions used in the implementation of each pool, which depends on which tokens are included in the pool and which token is set as \texttt{token0} and \texttt{token1}. For figures where we show multiple liquidity curves for the same pool, we set the scale of the y axis so that the level of each pool can be observed over time (e.g., Figure \ref{fig:example_liquidity_curves_usdc-weth}}. There is a large amount of liquidity centered around the current price for the WETH/USDC pool above, and the curve roughly resembles a bell curve. Liquidity for the USDT/WETH pool, on the other hand, is skewed to the right of the price, suggesting either that LPs are expecting prices to increase and positioning their liquidity to take advantage of where prices will be in the future or that LPs are not frequently rebalancing their positions.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/example_liquidity_curves.png}
+    \caption{Liquidity curves for the WETH/USDC and USDT/WETH pools at the beginning of January 27, 2022. Black horizontal lines denote each pool's current price.}
+    \label{fig:example_liquidity_curves}
+\end{figure}
+
+% might be better to put this in the Uniswap v3 section?
+Both curves also have notable spikes in liquidity. These spikes represent range orders - orders that mimic limit orders in traditional markets by taking advantage of the fact that a position's token composition changes as the pool's price moves from one side of the position to the other. If an LP provides liquidity within a very narrow range to one side of the current price, the position will be entirely composed of a single token. If and when the price crosses the position, so that the price is on the other side of the range, the position will now be composed of the other token, and the LP can remove his position having effectively executed a swap around the price at which he set his position. Because an LP is providing liquidity within such a narrow range, even a small investment may significantly increase $L$ within the price range, resulting in the spikes we see in the liquidity curves. There are, however, several differences between range orders and traditional limit orders. First, there is a limit to how narrow a position’s range can be as each tick has a width and each pool has a minimum spacing between which ticks can be used to define an position's range; as such, if the price is within that range, the order will only be partially executed \citep{Uniswapv3}. Second, once the position has been crossed, the LP must withdraw their investment. If they do not, and the price crosses back to the other side of the position, the swap will effectively be reversed \citep{Uniswapv3}.
+
+Not only do we see significant variation in liquidity curves across pools, but we also see notable changes in liquidity across time for each pool. Figure \ref{fig:example_liquidity_curves_usdc-weth} below presents the liquidity curves for the WETH/USDC pool across three different days. On July 18, 2021 (left) ETH prices were at one of the lowest points since the introduction of Uniswap v3 in May 2021. We can see that liquidity is skewed to the left of the pool's current price, suggesting that LPs may be expecting the ETH price to increase (\texttt{token1} for the WETH/USDC pool is WETH, so the pool's price generally tracks the inverse of the ETH market price, 1/ETH). On November 6, 2021 (middle), ETH prices were at their highest point since Uniswap v3's introduction. Liquidity is much more concentrated around the current price, but now liquidity is skewed to the right of the price, suggesting that LPs may be expecting the price of ETH to decline. Indeed, in both cases presented here, prices move in the direction where LPs have skewed their liquidity. While these results are purely  anecdotal, we would expect that, like CLOBs, liquidity curves provide information about the distribution of future prices. While we do not explore this more in our paper, it is an interesting area for future work. We present liquidity curves for the other six pools examined on the same three days in Appendix D.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/example_liquidity_curves_weth-usdt.png}
+    \caption{Liquidity curves for the WETH/USDC pool on three different days. Black horizontal lines denote each pool's current price.}
+    \label{fig:example_liquidity_curves_usdc-weth}
+\end{figure}
+
+\subsection{Liquidity Provider Returns}
+
+Like all rational investors, liquidity providers aim to maximize their risk adjusted return. Because of the convexity of the bonding curve in Uniswap markets, the arbitrary shapes and levels of liquidity that other LPs can create, the complex dynamics of a pool's price process, and high gas costs, finding an optimal LP strategy is difficult. To understand how different variables effect returns for different positions that LPs can create, we perform a number of simulations aimed at illustrating the kinds of factors that contribute to returns and that LPs should consider when devising a provisioning strategy. We structure our simulations as follows:
+
+\begin{enumerate}
+    \item We assume that the market price, $m$, follows a geometric Brownian motion process with drift, $\mu$, and volatility, $\sigma$. At the beginning of each simulation, the pool's price equals the beginning market price which we set at $p = m = 100$. We continue to use \texttt{token1} as our numeraire asset and \texttt{token0} as the risky asset in defining the price.
+
+    \item Each simulation is a single period with a single price innovation in the market price, $m$. Once the price innovation occurs, arbitrgeurs trade until there is no more profit, bring the pool's price close to the market price: $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$ (see our discussion of arbitrage above for details). For all simulations, we use $\gamma = 0.01$ for simplicity.
+
+    \item As noted by \citet{Lehar2021DecentralizedE}, if ``price innovations arrive with an exogenous intensity, then higher number of trades in a given interval must correspond to more liquidity trading." As such, before each price innovation occurs, $n \sim \text{Poisson}(\alpha)$, liquidity traders arrive, buying or selling a stochastic amount $s \sim \text{Exponential} \big( \frac{1}{\beta} \big)$\footnote{We parameterize the exponential distribution this way as it has the property that the mean trade size is $\beta$.} of \texttt{token1}. Immediately after each liquidity trade, an arbitrageur arrives and trades to take advantage of any price deviations, if possible, similar to our simulations in section 3.
+
+    \item Before any trading occurs, LPs provide liquidity creating one of two liquidity curves, shown in Figure \ref{fig:simulation_liquidity_curves}. The blue liquidity curve is simply constant at some value, $L(p) = l$, within the range $0 < p \le 200$. This curve is analogous to a Uniswap v2 liquidity curve as, given the parameters we use in our simulations, it is highly unlikely that the pool's price will exceed 200. The orange curve is a simple bell curve given by, $L(p) = c \sech^2{ \bigl( \frac{p - a}{b} \bigl)}$. The constant $c$ controls at what level of liquidity the curve peaks at, which we set so that both curves have the same amount of liquidity at the starting price, $p = 100$. In our initial simulations, we set $l = c = 10,000$.
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=\textwidth]{Images/simulation_liquidity_curves.png}
+        \caption{Two liquidity curves used for our return simulations. Both curves are centered at 100, which is the pool's starting price for all simulations.}
+        \label{fig:simulation_liquidity_curves}
+    \end{figure}
+
+    The liquidity curves above are constructed as 200, approximately one price unit width, bins; e.g., the first position spans $0 < p < 1$, the second position spans $1 \le p < 2$, and so on. Note that because of the positioning of Uniswap v3 ticks, no position is exactly one price unit wide; however, since each tick is a 1 basis point movement from its neighbors, we can create positions that are very close to this width within the range $0 < p \le 200$. We record the initial value of each position in terms of the numeraire token: $V(p) = p \Delta X + \Delta Y$, where $\Delta X, \Delta Y$ are the amounts of \texttt{token0}, \texttt{token1}, respectively added to the pool to create the position. With the exception of the position that spans $p = 100$, each position is composed entirely of a single token: \texttt{token1} for all positions to the left  of $p = 100$ and \texttt{token0} for all positions to the right of $p = 100$.
+
+    \item Once all liquidity traders and arbitrageurs have traded, including arbitrage from the single price innovation, the simulation ends. We calculate the total return to each position, including fees earned and any change in value due to disadvantageous rebalancing of the position from adverse selection, and the new market price. Because the ending pool price, $p'$, may deviate from the ending market price, $m'$, due to the arbitrage induced price bounds, we use $m'$ to calculate the total value of the position and its returns. We then average returns over 10,000 simulations to estimate the expected returns for each position.
+\end{enumerate}
+
+We start with an initial simulation with $l = c = 10,000, \mu = 0, \sigma = 0.1, \alpha = 50, \beta = 1,000$. The mean returns for each position are plotted in Figure \ref{fig:sim_returns_1} below. This graph allows us to see how returns vary depending both the level of liquidity provided and on where an LP provides liquidity relative the beginning price. Since our simulation only has a single price innovation, our simulations are akin to relatively short term returns. Figure \ref{fig:sim_returns_1} has several notable characteristics. First, returns are highest around the pool's starting price. This is unsurprising as most trades occur around this price and each trade generates fees for the positions. Even though the liquidity trades move the pool's price away from the initial price, arbitrageurs subsequently move the price back, generating additional fees for some positions. The dashed black lines represent the theoretical pool price bounds due to arbitrage, $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$, discussed in section 3. We can see that fees are actually lower in this range as arbitrageurs do not move the price all the way to $p = 100$, but to the edge of the theoretical bound. Returns from fees decrease exponentially as we move away from the pool's initial price. Because the size of each liquidity trade, $s$, is exponentially distributed, liquidity trades move the price by varying magnitudes. Most liquidity trades are small with relatively little price impact, so fewer positions participate in a swap and earn fees; however, there are also larger trades that have significant price impact, in which many positions along the space of prices earn fees.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/sim_returns_1.png}
+    \caption{Expected returns for the base simulation. The orange line presents the returns to the bell shaped liquidity curve; the blue line presents the returns to the constant liquidity curve. The dashed black lines represent the theoretical pool price bounds due to arbitrage, $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$.}
+    \label{fig:sim_returns_1}
+\end{figure}
+
+Unlike the constant liquidity curve, liquidity for the bell shaped curve decreases as we move away from the initial price, resulting in a larger price impact for each swap. The orange curve in Figure \ref{fig:sim_returns_1}, which correspond to the orange, bell shaped liquidity curve in Figure \ref{fig:simulation_liquidity_curves}, has consistently higher returns than the blue curve, which corresponds to the constant liquidity curve. The reason for this is twofold. First, the larger price impact results in more positions participating in the swap, spreading out fees further than if there was constant liquidity. Second, positions away from the initial price require less capital to establish compared to their constant liquidity counterparts, so, given a fixed amount of fees for two positions spanning the same price range, the returns to the bell curve position will be larger than the returns to the constant liquidity position.
+
+% PS: NEED TO RE-REVIEW! DON'T MIX UP LEFT AND RIGHT
+As we move away from the space of prices that $m$ is likely to end at, positions are less likely to earn fees or experience negative rebalancing. As such, positions far to the left of the initial price act simply like long positions in \texttt{token1}, which as the numeraire have returns of 0\%, and positions far to the left of the initial price act like long positions in \texttt{token0}, which are exposed changes in the market price. This is apparent from Figure \ref{fig:lp_position_value} above and is easy to show using equation~\eqref{eq:19}. As long as $p < p(i_l)$, the value of the position changes linearly with $p$. However, once $p \ge p(i_u)$, the position's value is constant, and there is no upside as prices increase further. For a position whose range is consistently below the pool's price, $p \ge p(i_u) \hspace{0.2cm} \forall p$, so that the position is composed entirely of \texttt{token1} and does not earn fees, the return on the position is:
+\begin{gather}
+    \frac{V(p')}{V(p)} - 1 = \frac{\Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big)}{\Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big)} - 1 = 0 \label{eq:22}
+\end{gather}
+Conversely, for a position whose range is consistently above the pool's price, $p < p(i_l) \hspace{0.2cm} \forall p$, so that the position is composed entirely of \texttt{token0} and does not earn fees, the return on the position is:
+\begin{gather}
+    \frac{V(p')}{V(p)} - 1 = \frac{\Delta L p' \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg)}{\Delta L p \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg)} - 1 = \frac{p'}{p} - 1 \label{eq:23}
+\end{gather}
+Note that, for simplicity, we assume that $m' = p'$ above. Because prices follow a geometric Brownian motion process, we know that the ending price $m' \sim \text{Lognormal}(\bigl(\mu - \frac{\sigma^2}{2} \bigl) t, \sigma^2 t)$; with $\mu=0, \sigma=0.1$, the expected return is 0, which is consistent with the results in \ref{fig:sim_returns_1}.
+
+While our initial simulation is interesting in its own right, understanding how returns vary as different variables vary provides much richer information on the dynamics of Uniswap v3 liquidity positions. Next, we perform the same simulation, except we vary $\alpha$, the expected number of liquidity traders, and $\beta$, the expected size of the liquidity trade. Note that we use the same random seed for all simulations discussed in this section in order to isolate the effects of changing certain variables. Figure \ref{fig:sim_returns_2} presents the simulation results for combinations of $\alpha \in \{ 10, 50, 100\}$ (across) and $\beta \in \{ 500, 1000, 5000\}$ (up/down). For a given $\beta$, increasing the expected number of liquidity trades, $\alpha$, has the effect of uniformly increasing the level of returns. While more liquidity trades will increase the total fees earned, if the size of their trades is fixed, the distribution of fees remains unchanged. Alternatively, for a given $\alpha$, increasing the size of each liquidity trade, $\beta$, both increases total fees, resulting in a level increase in returns, and results in more positions participating in each swap, expanding the number of positions that earn fees and, in turn, experience positive returns. These effects are also clearly additive, as can be seen from the increase in expected returns as we move from the upper left simulation ($\alpha=10, \beta=100$) to the lower right simulation ($\alpha=100, \beta=5000$).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth,trim={0 4cm 0 4cm},clip]{Images/sim_returns_2.png}
+    \caption{Expected returns for varying expected number of liquidity trades, $\alpha$, and expected liquidity trade size, $\beta$. The orange line presents the returns to the bell shaped liquidity curve; the blue line presents the returns to the constant liquidity curve.}
+    \label{fig:sim_returns_2}
+\end{figure}
+
+For the next set of simulations, we reset $\alpha, \beta$ to their original values and vary the parameters of the price process, $\mu, \sigma$. Figure \ref{fig:sim_returns_3} presents the simulation results for combinations of $\mu \in \{ -0.05, 0.0, 0.05 \}$ (up/down) and $\beta \in \{ 0.05, 0.1, 0.2 \}$ (across). The effect of changes in the drift of $m$ is the most apparent. Positions far to the right of the initial price either experience notably negative, flat, or positive returns depending on whether there is negative, zero, or positive drift, respectively; as discussed above, these positions are akin to long positions in \texttt{token0}. The effects of sigma are more nuance, but very consequential. As $\sigma$ increases, we can see the positions around the center (around $p=90, p=110$) begin to become concave and even negative. $\sigma$ has a direct effect on the adverse selection experienced. Since each position for our simulation is only one price unit wide, almost every position that experiences disadvantageous rebalancing from adverse selection is rebalanced so that the token composition shifts entirely from one token to the other. As such, we can use Figure \ref{fig:lp_position_value} and equation~\eqref{eq:19} above to understand how such adverse selection impacts returns in the absence of fees.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth,trim={0 4cm 0 4cm},clip]{Images/sim_returns_3.png}
+    \caption{Expected returns for varying drifts, $\mu$, and volatilities, $\sigma$, for the market price process. The orange line presents the returns to the bell shaped liquidity curve; the blue line presents the returns to the constant liquidity curve.}
+    \label{fig:sim_returns_3}
+\end{figure}
+
+% PS: would be good for someone to read these next 2 paragraphs to ensure they are clear
+Let us first consider a position that spans a set of prices above the current price, $p < p(i_l)$. If prices decrease, so that $p' < p(i_l)$, the position's composition remains the same and the value of the position changes linearly with $p$, as described in equation~\eqref{eq:23}. If the price increases from $p < p(i_l)$ to $p' \ge p(i_u)$, the position is rebalanced from 100\% \texttt{token0} to 100\% \texttt{token1}. We can see in Figure \ref{fig:lp_position_value} that this price movement pushes the value from the range where $V(p)$ changes linearly with $p$ ($p < p(i_l)$) to where $V(p)$ is constant ($p' \ge p(i_u)$). As such the return from this price movement is:
+\begin{gather}
+    \frac{V(p')}{V(p)} - 1 = \frac{\Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big)}{\Delta L p \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg)} - 1 = \frac{\sqrt{p(i_u) p(i_l)}}{p} - 1
+\end{gather}
+In our case, where $p(i_l) \approx p(i_u)$, we can see that the upside is limited to approximately $\frac{p(i_u)}{p} - 1$. This limited upside is a direct cause of the negative returns for positions around $p=110$. As $\sigma$ increases and large price declines become more likely, these positions experience larger losses. However, since they have limited upside, they do not participate in the larger potential gains from higher volatility. Therefore, in expectation, their returns are negative.
+
+Next, let us consider a position that spans a set of prices below the current price, $p \ge p(i_u)$. If prices increase, $p' < p(i_l)$, the position's composition remains the same and the value of the position is constant, as described in equation~\eqref{eq:22}. On the other hand, if the price decreases from $p \ge p(i_u)$ to $p' < p(i_l)$, the position is rebalanced from 100\% \texttt{token1} to 100\% \texttt{token0}. We can see in Figure \ref{fig:lp_position_value} that this price movement pushes the value from the range where $V(p)$ is constant and at it's highest point ($p \ge p(i_u)$) to where $V(p)$ changes linearly with $p$ ($p' < p(i_l)$). As such the return from this price movement is:
+\begin{gather}
+    \frac{V(p')}{V(p)} - 1 = \frac{\Delta L p' \bigg( \frac{1}{\sqrt{p(i_l)}} - \frac{1}{\sqrt{p(i_u)}} \bigg)}{\Delta L \big( \sqrt{p(i_u)} - \sqrt{p(i_l)} \big)} - 1 = \frac{p'}{\sqrt{p(i_u) p(i_l)}} - 1
+\end{gather}
+Because we only see returns of this form when prices decline and the position is negatively rebalanced, this return is bounded between $(-1, 0)$. The limited upside coupled with notable downside risk is the direct cause of the negative expected returns for positions around $p=90$. As $\sigma$ increases and large price declines become more likely, these positions experience larger losses. However, these position begin at their maximum value as $p \ge p(i_u)$, so there is no upside whatsoever. This, again, results in negative returns in expectation. While positions between $90 < p < 110$ are also exposed to adverse selection risk, the fees generated by these positions more than offsets the downside from negative rebalancing and disadvantageous price movements, resulting in positive returns in expectation.
+
+While LPs can estimate the number and size of liquidity trades and the dynamics of the market price process, they do not directly control these variables\footnote{Theoretically, more liquidity in a pool may attract more liquidity traders as traders will experience less price impact.}. LPs do, however, determine the level of liquidity in a pool. If an LP thinks a pool is too crowded, they can decide not to allocate their capital to the pool. In our next set of simulations, we revert back to our baseline values, $\mu = 0, \sigma = 0.1, \alpha = 50, \beta = 1,000$, but now vary the amount of liquidity in the pool by changing $l, c$. Figure \ref{fig:sim_returns_4} shows the return plots for $l, c \in \{ 10000, 25000, 50000 \}$. Increasing liquidity has a huge impact on positions' returns. First, with more liquidity, there is less price impact, so fewer positions participate in a swap and earn fees, tightening the range of prices for which returns are positive. In fact, as illustrated in the right graph, if liquidity is high enough, a swap will not even move the price outside of the theoretical price bounds, which removes the dip in returns at $p=100$ that we see in other plots. Second, for a fixed number of liquidity trades, increasing liquidity results in positions earning the same amount of fees on a larger amount of capital invested, which simply decreases fee returns. Because the ending market price, $m'$, is unaffected by the level of liquidity, increasing liquidity only reduces fee returns; it does not reduce a position's adverse selection risk. As such, too much liquidity in a pool can result in very few LPs earning sufficient fees to cover the costs of disadvantageous rebalancing from adverse selection.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/sim_returns_4.png}
+    \caption{Expected returns for varying levels of liquidity, $l, c$. The orange line presents the returns to the bell shaped liquidity curve; the blue line presents the returns to the constant liquidity curve.}
+    \label{fig:sim_returns_4}
+\end{figure}
+
+Even for $l, c = 50,000$, there are some positions that earn positive returns due to the fees generated around the initial price. What happens if we increase liquidity even further? Figure \ref{fig:sim_returns_5-6} plots the results of the same simulations with $l, c = 100,000$ and $l, c = 200,000$. At $l, c = 100,000$, only positions within the theoretical price bounds earn fees as there is so much liquidity that the price impact of liquidity trades does not move the price outside of the bounds; i.e., liquidity trades are not large enough to push the price outside this range. Interestingly, because the price does not move outside of the theoretical bounds, arbitrageurs do not trade immediately after each liquidity trade, which actually reduces the total number of swaps that occur, further reducing the fees generated. With the exception of positions far from the initial price, which again earn either zero returns or simply the return on $m$, all other positions experience negative returns as adverse selection easily outweighs the fees generated. At $l, c = 200,000$, there is now so much liquidity that even positions at the initial price do not earn sufficient fees to outweigh adverse selection.
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[b]{\textwidth}
+        \includegraphics[width=\textwidth,trim={0 2cm 0 0},clip]{Images/sim_returns_5.png}
+    \end{minipage}
+    \begin{minipage}[b]{\textwidth}
+        \includegraphics[width=\textwidth]{Images/sim_returns_6.png}
+    \end{minipage}
+    \caption{Expected returns for varying levels of liquidity, $l, c$. The orange line presents the returns to the bell shaped liquidity curve; the blue line presents the returns to the constant liquidity curve. Dashed black lines represent the theoretical pool price bounds due to arbitrage, $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$.}
+    \label{fig:sim_returns_5-6}
+\end{figure}
+
+In all of our simulations so far, fee income peaks around the initial price as there is only one price innovation. However, in reality, the market price continually fluctuates - we have many small price innovations instead of large, infrequent price innovations. As such, we perform the same simulations except now we allow for five smaller price innovations before the simulation ends. To make these next simulations comparable to the previous simulations, we keep the length of the simulation constant, but adjust our parameters. We divide $\alpha$ and $\mu$ by five so that our simulation has the same total number of liquidity trades and same total drift. We divide $\sigma$ by $\sqrt{5}$ (as volatility scales with the square root of time) so that $m'$ takes on the same distribution as the original simulations. Figure \ref{fig:sim_returns_7-8} shows our results of these simulations for $l, c = 10,000$ and $l, c = 200,000$. For $l, c = 10,000$, the low liquidity case, fees earned are now more spread out, which then spreads out returns. We still see the same effect on returns within the arbitrage price bounds as there are at least a few liquidity trades that occur around the initial price, but the effect is far less pronounced. We see similar results for $l, c = 200,000$, but returns are notably negative. As expected, if the market price continually moves, centering liquidity at the current price provides less benefits as the price may quickly move away from the position. Again, this suggests that rebalancing is extremely important for capturing sufficient fee income to overcome the risk of adverse selection. Unfortunately, with high gas costs, such rebalancing can also be very expensive and result in the need to generate even more fee income to produce positive returns.
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[b]{\textwidth}
+        \includegraphics[width=\textwidth,trim={0 2cm 0 0},clip]{Images/sim_returns_7.png}
+    \end{minipage}
+    \begin{minipage}[b]{\textwidth}
+        \includegraphics[width=\textwidth]{Images/sim_returns_8.png}
+    \end{minipage}
+    \caption{Expected returns for varying levels of liquidity, $l, c$, for a simulations with multiple price innovations. The orange line presents the returns to the bell shaped liquidity curve; the blue line presents the returns to the constant liquidity curve. Dashed black lines represent the theoretical pool price bounds due to arbitrage, $p (1 - \gamma) \le m < \frac{p}{1 - \gamma}$.}
+    \label{fig:sim_returns_7-8}
+\end{figure}
+
+% Phil to finish cleaning up 3/8 - not quite ready for everyone to review
+\section{Empirical Findings}\label{sec:5}
+
+Armed with a better understanding of the dynamics of LP returns, we now examine returns for actual Uniswap v3 pools. Our goal is to understand whether these pools result in positive returns for LPs and whether these pools are in equilibrium. In equilibrium, the amount and position of liquidity (i.e., the level and shape of of the liquidity curve) is such that liquidity suppliers are indifferent between committing capital within any tick in the pool or to their outside option \citep{Lehar2021DecentralizedE}. As such, if a pool is in equilibrium, we would expect that returns to each tick, in expectation, would be approximately equal to zero. Such a zero-profit condition assumes that there are very low costs to enter or exit a position. While Ethereum gas fees may be high, they do not present a notable barrier to entry or exit, so characterizing equilibrium in this way is appropriate. \citet{Lehar2021DecentralizedE} show that the equilibrium size of a Uniswap v2 pool balances fee revenue against the negative rebalancing of adverse selection. This holds for Uniswap v3 as well, but now we expect it to hold within each tick. If any particular tick experiences positive (negative) returns, LPs could add (remove) liquidity to (from) that range until the return moves to zero. Consistent with \citet{Aoyagi2020LiquidityPB}, our simulations above suggest that the equilibrium amount of liquidity at any tick is negatively related to the volatility of the risky token, which effects adverse selection, and positively related to the number and size of liquidity trades, which effects fee revenue.
+
+We examine pools with more than \$50 million in weekly volume as of January 2022 that are not stable coin pairs, for which liquidity is tightly bound around 1.0. This results in 7 pools, 6 of which are WETH, stable coin pools with fees of either 0.3\% or 0.05\%, the last of which is a WBTC, stable pool with a fee of 0.3\%. We collected data on all liquidity transactions and swaps from each pool's inception through the  end of January 2022. Summary statistics for each of the seven pools is presented in table \ref{tab:summary_statistics} below. While there is some variation among pools, we can see that, given a fee rate, pools with more trading result in more fees and generally have higher \gls{tvl}, which measures the amount of liquidity locked into the pool. For each pool, total fees to \gls{tvl} varies between approximately 0.3\% to 1.25\%, and it is reasonable expect that LPs in pools with higher fee/\gls{tvl} ratios may experience higher returns as fees are earned on a relatively smaller base of capital.
+
+\vspace{0.5cm}
+\begin{table}[H]
+    \scriptsize
+    \centering
+    \captionsetup{justification=centering}
+    \begin{tabular}{lrrrrrr}
+        \toprule
+        Pair (\texttt{token1}/\texttt{token0}) & Fee Tier & \# of Trades & Volume (USD) & Fees & TVL (USD) & Fees/TVL \\
+        \midrule
+        WETH/USDC & 0.05\% & 41,651 & 5.07b & 2.53m & 203.64m & 1.24\% \\
+        WETH/USDC & 0.30\% & 2,835 & 466.43m & 1.40m & 238.43m & 0.58\% \\
+        USDT/WETH & 0.05\% & 17,956 & 771.06m & 385.53k & 37.99m & 1.01\% \\
+        USDT/WETH & 0.30\% & 2,117 & 208.84m & 626.51k & 115.52m & 0.54\% \\
+        WETH/DAI & 0.05\% & 5,339 & 142.34m & 71.17k & 14.87m & 0.47\% \\
+        WETH/DAI & 0.30\% & 1,334 & 76.64m & 229.93k & 60.38m & 0.38\% \\
+        USDC/WBTC & 0.30\% & 1,716 & 246.45m & 739.34k & 94.17m & 0.78\% \\
+        \bottomrule
+    \end{tabular}
+    \caption{Summary statistics for the 7 pools examined for 1st week of March 2022. \\
+    (Source: \url{https://dune.xyz/gammastrategies/Uniswap-v3-Volume-and-Fees-Collected})}
+    \label{tab:summary_statistics}
+\end{table}
+
+With this data and our Uniswap v3 simulator, we are able to approximately recreate each pool at any point in time. There are two limitations that do not allow us to exactly recreate the pool. The first, and more significant, limitation is that time stamps for transactions are only precise to the second. If multiple transactions occur in the same second, it is not possible\footnote{Theoretically, we could determine the correct order of transactions through trial and error by validating that our pool's state matched the pool's state recorded on the Ethereum \gls{blockchain}. This would require additional data on the pool's state after each transaction, which we were not able to obtain.} to determine which transaction occurred first. However, order matters in Uniswap pools: each time a swap occurs the price changes, which determines how much of each token an LP must provide for a given level and range of liquidity; each time an LP changes their position, liquidity changes, which changes swap dynamics and the price impact of each swap. Even though we are not able to exactly replicate the pools, we found that the pools' prices all tracked the relevant reference prices obtained from other data sources, so we do not believe such approximation error has a significant impact on our results. Our Uniswap v3 simulator uses floating point precision for all calculations while the actual Uniswap smart contracts all use integer arithmetic to minimize rounding errors. The use of floating point precision introduces another source of error in our approximations; however, we found that this error was immaterial.
+
+If the liquidity provided to a pool is in equilibrium, then, by the zero profit condition discussed above, we would expect that returns to each tick range would be approximately equal to zero in expectation. To test whether we see this in the pools in practice, we estimate the daily expected return to providing liquidity in different areas around the pool's initial price. For each day, we created 22 bins around the pool's initial price, $p_0$. 20 of the bins are each $1\sigma$ wide, where $\sigma$ is the approximate daily volatility for each asset token, WETH and WBTC; for all of our experiments, we use $\sigma=0.04$. For example, the first few bins around the initial price would be $[p_0(1 - 2\sigma), p_0(1 - \sigma)), [p_0(1 - \sigma), p_0), [p_0, p_0(1 + \sigma)), [p_0(1 + \sigma), p_0(1 + 2\sigma))$. The last two bins span the areas outside $\pm 10\sigma$: $(0, p_0(1 - 10\sigma)$ and $(p_0(1 + 10\sigma), \infty)$. Figure \ref{fig:liquidity_bins} illustrates the bins used for the WETH/USDC liquidity curve for a single trading day.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/liquidity_bins_example.png}
+    \caption{Liquidity bins for the WETH/USDC pool on January 27, 2022.}
+    \label{fig:liquidity_bins}
+\end{figure}
+
+We calculated the daily return to each bin as the money weighted rate of return (MWRR) between the beginning of the day and the end of the day. The MWRR takes into account cash flows that occur during the day, which is important as LPs may rebalance their positions during the day. The MWRR is effectively the internal rate of return, which is the return, $r$, that results in the net present value (NPV) of a series of cash flows equaling zero:
+\begin{gather*}
+    \text{NPV} = \sum_{t=0}^{n} \frac{\text{CF}_t}{(1 + r)^t} = 0
+\end{gather*}
+To calculate the MWRR, we assume that the liquidity curve is constructed at the beginning of the day, which results in the initial negative cash flow at time $t=0$, and completely divested at the end of the day, including collecting fees earned, which results in the last positive cash flow at $t=1$. The only cash flows intraday are due to LPs adding or removing liquidity. The daily returns to the 22 bins are then averaged over the life of the pool to arrive at the estimated expected values.
+
+We present the expected returns, along with their 95\% confidence intervals, for the USDT/\gls{weth} pool in Figure \ref{fig:mean_returns_weth-usdt} below and a condensed table of results for all pools in table \ref{tab:daily_return_table}; similar graphs for the other pools are included in appendix E, but all curves have a similar shape and similar properties.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Images/lp_returns_weth-usdt.png}
+    \caption{Mean daily returns for the USDT/WETH pool along with the 95\% confidence interval.}
+    \label{fig:mean_returns_weth-usdt}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \scriptsize
+    \begin{tabular}{
+    l
+    % centered, fixed width columns
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    >{\centering\arraybackslash}p{1.2cm}
+    }
+        \toprule
+        {} & $[-4\sigma, -3\sigma)$ & $[-3\sigma, -4\sigma)$ & $[-2\sigma, -4\sigma)$ & $[-1\sigma, 0\sigma)$ & $[0\sigma, 1\sigma)$ & $[1\sigma, 2\sigma)$ & $[2\sigma, 3\sigma)$ & $[3\sigma, 4\sigma)$ \\
+        \midrule
+        WETH/DAI, 0.3\%  & -0.04\% & -0.08\% & -0.19\% & -0.53\% & -0.53\% & -0.22\% & -0.04\% & -0.04\% \\
+        WETH/DAI, 0.05\%   &  0.25\% & -0.17\% & -0.50\% & -1.19\% & -1.11\% & -0.74\% & -0.53\% & -0.47\% \\
+        WETH/USDC, 0.3\% & -0.04\% & -0.09\% & -0.31\% & -0.84\% & -0.73\% & -0.17\% &  0.03\% &  0.03\% \\
+        WETH/USDC, 0.05\%  & -0.15\% & -0.29\% & -0.52\% & -0.95\% & -1.02\% & -0.34\% &  0.18\% & -0.09\% \\
+        USDT/WETH, 0.3\% & -0.07\% & -0.11\% & -0.24\% & -0.75\% & -0.81\% & -0.31\% & -0.19\% & -0.15\% \\
+        USDT/WETH, 0.05\%  & -0.03\% & -0.09\% & -0.32\% & -0.90\% & -0.90\% & -0.36\% & -0.23\% & -0.15\% \\
+        USDC/WBTC, 0.3\% &  0.02\% &  0.03\% & -0.09\% & -0.44\% & -0.52\% & -0.17\% & -0.10\% & -0.10\% \\
+        \bottomrule
+    \end{tabular}
+    \caption{Daily expected returns for different bins of liquidity relative to the beginning price for the day for each pool.}
+    \label{tab:daily_return_table}
+\end{table}
+
+Returns to LPs that provide liquidity around the current price, $[p_0(1 - \sigma), p_0(1 + \sigma))$, are on average negative; we see this in all 7 pools examined. In fact, the shape of our empirical mean daily returns is remarkably similar to the $l, c = 200,000$ simulated expected returns in Figure \ref{fig:sim_returns_7-8}, suggesting that the reason for such negative expected returns is too much liquidity around the current price. The majority of transaction fees are generated around the pool's current price, so LPs will center their positions in this range in order to maximize their fee revenue. However, as more LPs add liquidity to this range, each LP's share of the fees generated becomes smaller. If too many LPs add liquidity to the range, the fees earned will not be enough to offset potential depreciation in their positions' values due to negative rebalancing from adverse selection. While such negative returns are somewhat surprising, our results are consistent with the results of \citet{loesch2021impermanent}. \citet{loesch2021impermanent} find that, for the 17 pools they examine, roughly 40\% to 60\% of LPs incur negative returns, depending on the pool, and that in aggreagate 49.5\% of all LPs incur negative returns. Further, the authors find that LPs that contribute more capital are more likely to experience negative returns, suggesting that an LP's size may not result in any competitive advantage as originally hypothesized.
+
+For all pools, the standard error of returns either grows from zero or shrinks to 0 as we move from left to right of the current price. Whether the volatility in returns increases or decreases as we move left to right is determined by which token, \texttt{token0} or \texttt{token1}, for the pool is the stable coin and our numeraire token. While mean daily returns for positions entirely denominated in risky asset (WETH or WBTC in the pools we examine) may be close to zero, these positions are exposed notable volatility. In practice, it is unlikely that an LP would create or leave in tact a tight position that is far away from the current price. However, this suggests that many LPs are creating positions that span a relatively large range of prices. Unlike a \gls{clob} market where market makers can freely submit and cancel orders, Uniswap LPs incur gas costs whenever they update their positions. \citet{Lehar2021DecentralizedE} suggest that, in Uniswap v2, Ethereum gas fees act as a ``commitment device" for LPs to remain in a pool. Similarly, gas fees may act like such a commitment device for LPs to stay within any given position. Because rebalancing is costly and volatility for WBTC and \gls{weth} is relatively high, it is understandable that LPs may create positions that they do not have to rebalance as often to earn fees. \citet{LambertMedium2} suggests that positions with tight ranges kept in for short amounts of time outperform wider positions that are left for longer periods. To actually execute such a strategy, an LP must actively rebalance their position as prices change, which, again, may be prohibitively expensive for smaller investments given gas fees. Recently, Uniswap has also created pools on the Polygon \gls{blockchain}, which is compatible with all Ethereum smart contracts, but has notably lower gas costs. While these pools are still in their infancy, it will be interesting to see whether liquidity becomes less distributed and is rebalanced more often as gas costs come down.
+
+\citet{loesch2021impermanent} find that 25\% of positions last less than a day whereas 50\% of positions last for a week or longer. As such, we performed the same procedure for hourly returns and weekly returns as well as for various values of $\sigma$ (i.e., different sized bins). The results for all such experiments were effectively the same as the results for daily returns presented herein: negative returns around the current price with positions further from the center acting like long positions in \texttt{token0} or \texttt{token1}. \citet{loesch2021impermanent} also find that about 5\% of LP positions only exist for a single block. These ``flash LPs" are actually the only group of LPs that the authors find outperform IL. This is, in a sense, taking the advice of \citet{LambertMedium2} to an extreme. If an LP can reasonably predict when large trades will occur\footnote{Theoretically, an LP could front run a swap as well.}, an LP can add liquidity exactly where the swap will generate fees, collecting the maximum amount of revenue given their capital. By immediately removing this position after the transaction (or after an arbitrageur moves the price back to the true market price), the LP also minimizes the negative rebalacing that occurs, reducing any depreciation in their position's value.
+
+Surprisingly, we did not find any instances of positive expected returns for positions around the current price, suggesting that these pools simply have too much liquidity relative to level of liquidity trades and amount of volatility that these tokens exhibit. We expect that, if LPs experience prolonged negative returns, LPs will exit the pools, decreasing liquidity until such liquidity remaining no longer earns negative returns. Too much liquidity, though, is undoubtedly a good thing for traders, whose trades will experience less price impact. Therefore, we may also expect that this excess liquidity may attract more traders, increasing the fee revenue earned by LPs until the existing LP base begins to experience non-negative returns. Like all markets, if there is too much supply, an increase in demand (e.g., an increase in traders using the Uniswap v3 pools) or a decrease in supply (e.g., existing LPs exiting the Uniswap v3 pools) will help shift the market back towards equilibrium. Given the additional complexity introduced by  \gls{concen_liq} in Uniswap v3, arriving at such an equilibrium may take longer than in the simpler Uniswap v2 pools as researchers are still actively exploring the dynamics of these new \glspl{amm}.
+
+\section{Conclusion}\label{sec:6}
+
+With the introduction of  \gls{concen_liq}, Uniswap v3 added a layer of complexity to providing liquidity and introduced competition into Uniswap markets. While sophisticated investors may be able to take advantage of the additional functionality now available to LPs, earning positive, risk adjusted returns is nontrivial and an optimal liquidity provisioning strategy is far from clear. As researchers continue to explore Uniswap v3 pools and as LPs better understand the dynamics of their investments, we do expect clearer LP strategies to emerge though, similar to the ``flash LPs" identified by \citet{loesch2021impermanent}. Further, as Ethereum continues to improve the gas costs associated with transactions and as Uniswap pools are deployed on the Polygon blockchain, we also expect that more sophisticated liquidity provisioning strategies will emerge as the cost of rebalancing a portfolio will decline. While such strategies may increase competition among LPs, they may also improve price efficiency to the extent that LPs are able to more effectively deploy their capital in the range that traders demand.
+
+Our results, however, indicate that, currently, the largest non stable coin pair pools have too much liquidity given the level of liquidity trades and the volatility that the risky asset tokens exhibit, making it very difficult to earn positive returns. As LPs readjust their strategies, potentially even leaving the Uniswap pools, and as DEXs continue to grow in popularity, attracting more traders, we expect that the level and and positioning of liquidity will move into equilibrium over time.
+
+\section{Future Work}\label{}
+
+\newpage
+\bibliography{references}
+
+\begin{appendices}
+
+\newpage
+
+% PS: maybe remove this section - doesn't add much value at this point imo
+\section{Notation}\label{sec:7}
+\begin{center}
+    \begin{tabular}{p{1cm}p{15cm}}
+     $x$ & Actual reserves, in the context of Uniswap v2, or ``virtual" reserves, in the context of Uniswap v3, for \texttt{token0}. \\
+     $y$ & Actual reserves, in the context of Uniswap v2, or ``virtual" reserves, in the context of Uniswap v3, for \texttt{token1}. \\
+     $p$ & The price of the Uniswap pool defined in terms of its reserves: $p = \frac{y}{x}$. \\
+     $m$ & The market price of the asset, which may deviate from the pool price, $p$. This can generally be thought of as the mid-quote from a traditional centralized exchange. \\
+     $\gamma$ & The transaction fees for the Uniswap pool. \\
+     $L, L(p)$ & The liquidity available in a Uniswap v3 pool at a give price, $p$. We drop the dependence on $p$ when it is clear that $L$ is constant within the range being discussed, which is consistent with the notation in the Uniswap v3 white paper. \\
+     $q$ & The square root of the price, $q = \sqrt{p}$, used to formulate our analytical approximations for swapping in Uniswap v3.
+    \end{tabular}
+\end{center}
+
+\section{Splitting Trades is Equivalent to a Single Trade}\label{sec:8}
+
+\citet{angeris2021analysis} show that splitting a trade is always more expensive in the presence of proportional transactions fees and zero gas fees in Uniswap v2 pools. This is not the case in Uniswap v3 pools because transaction fees are not added to the pool's reserves after a swap. We prove this below, following a similar procedure as \citet{angeris2021analysis}, for the simple case where the swap is small enough so that $L$ is constant for the entire range of the swap.
+
+We show that two sequential swaps, $\Delta x, \frac{\Delta y}{1 - \gamma}$ and $\Delta x', \frac{\Delta y'}{1 - \gamma}$, are equivalent to a single swap, $\Delta x^{\text{total}}, \frac{\Delta y + \Delta y'}{1 - \gamma}$, in the absence of gas fees and constant liquidity, $L$. Since we are swapping in \texttt{token1}, the amount of \texttt{token1} added to the pool after fees are set aside is $\frac{\Delta y}{1 - \gamma} (1 - \gamma) = \Delta y$, $\frac{\Delta y'}{1 - \gamma} (1 - \gamma) = \Delta y'$. The first swap satisfies:
+\begin{gather*}
+    (x + \Delta x)(y + \Delta y) = L^2
+\end{gather*}
+This swap updates the pool's price from $p$ to $p' = \frac{y + \Delta y}{x + \Delta x}$, so the next swap then satisfies:
+\begin{gather*}
+    (x + \Delta x + \Delta x')(y + \Delta y + \Delta y') = L^2 \\
+    \implies \Delta x + \Delta x' = \frac{L^2}{y + \Delta y + \Delta y'} - x
+\end{gather*}
+If a trader swaps in $\frac{\Delta y + \Delta y'}{1 - \gamma}$ in a single trade, then $\frac{\Delta y + \Delta y'}{1 - \gamma} (1 - \gamma) = \Delta y + \Delta y'$ is added to the pool, and the swap must satisfy:
+\begin{gather*}
+    (x + \Delta x^{\text{total}})(y + \Delta y + \Delta y') = L^2 \\
+    \implies \Delta x^{\text{total}} = \frac{L^2}{y + \Delta y + \Delta y'} - x = \Delta x + \Delta x'
+\end{gather*}
+This result also holds in the case of non-constant liquidity. When a swap is executed over a price range where liquidity changes, the swap is split into multiple parts and executed over each range where liquidity is constant and then summed together. As long as the pool's reserves do not change between two sequential swaps - which only happens when LPs add or remove liquidity as fees are not added to a pool's reserves - sequentially swapping is the same as a single large swap in Uniswap v3.
+
+\section{Price Bound Simulation Results}\label{sec:9}
+Below we presented the simulated price bounds for three different price series (across) and three different increasing liquidity curves (up/down), $L(p) = 10p + 4,000$, $L(p) = 25p + 2,500$, and $L(p) = 50p + 0$, with $\gamma = 0.03$, as discussed in section 3. While we also ran these simulations for three different decreasing liquidity curves, the resulting graphs are identical, illustrating that the price bounds are the same whether liquidity is increasing or decreasing around the current price.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth,trim={0 4cm 0 4cm},clip]{Images/arbitrage_price_bounds_all.png}
+    \caption{Simulated price bounds for three different price series (across) and three different liquidity curves (up/down), $L(p) = 10p + 4,000$, $L(p) = 25p + 2,500$, and $L(p) = 50p + 0$, with $\gamma = 0.03$. Results are the same for the three decreasing liquidity curves discussed above.}
+    \label{fig:all_price_bound_simulation}
+\end{figure}
+
+\section{Example Liquidity Curves}\label{sec:10}
+Liquidity curves for six of the seven pools (up/down) examined (note that the liquidity curves for the WETH/USDC, 0.05\% fee pool are included in section 4.1 above). The pools presented are as of July 18, 2021 (left), November 6, 2021 (middle), and January 27, 2022 (right). We do not show the scale of the y axis for the liquidity curves as liquidity varies in scale based on different decimal conventions used in the implementation of each pool. However, we set the scale of the y axis so that the relative level of liquidity for each pool can be observed over time.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth,trim={0 10cm 0 10cm},clip]{Images/example_liquidity_curves_all.png}
+    \label{fig:example_liquidity_curves_all}
+\end{figure}
+
+\section{Expected Daily Returns to Liquidity Providers}\label{sec:11}
+Estimated daily mean returns, along with their 95\% confidence intervals, for six of the seven pools examined (note that the results for the USDT/WETH, 0.05\% fee pool are included in section 5 above). For all pools, the standard error of returns either grows from zero or shrinks to 0 as we move from left to right of the current price. Whether the volatility in returns increases or decreases as we move left to right is determined by which token, \texttt{token0} or \texttt{token1}, for the pool is the stable coin and our numeraire token.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth,trim={0 4cm 0 4cm},clip]{Images/lp_returns_all.png}
+    \caption{Estimated daily mean returns, along with their 95\% confidence intervals, for six of the seven pools examined.}
+    \label{fig:mean_returns_all}
+\end{figure}
+
+\end{appendices}
+
+\end{document}
